@@ -8,6 +8,8 @@ public sealed class AppState
     public int KvmSwitchesAway { get; set; }
     public int KvmSwitchesBack { get; set; }
     public int DockEvents { get; set; }
+    /// <summary>How many of the KVM switches took only the USB side while the monitors stayed connected.</summary>
+    public int KvmUsbOnly { get; set; }
     public DateTime? LastKvmSwitch { get; set; }
     public DateTime? LastDockEvent { get; set; }
 
@@ -49,7 +51,9 @@ public sealed class KvmDetector : IDisposable
     private static readonly TimeSpan Window = TimeSpan.FromSeconds(3);
 
     private HashSet<string> _connected;
-    private readonly List<(DateTime At, string Kind)> _events = new(); // Kind: monitor-, monitor+, hid-, hid+, other-, other+
+    // Kind: monitor-, monitor+, hid-, hid+, other-, other+. Key identifies the device so a flapping hub counts once.
+    private readonly List<(DateTime At, string Kind, string Key)> _events = new();
+    private int _monitorSeq;
 
     public KvmDetector(AppState state)
     {
@@ -72,8 +76,9 @@ public sealed class KvmDetector : IDisposable
         int added = now.Count(id => !_connected.Contains(id));
         _connected = now;
         var at = DateTime.Now;
-        for (int i = 0; i < removed; i++) _events.Add((at, "monitor-"));
-        for (int i = 0; i < added; i++) _events.Add((at, "monitor+"));
+        for (int i = 0; i < removed; i++) _events.Add((at, "monitor-", "m" + (++_monitorSeq)));
+        for (int i = 0; i < added; i++) _events.Add((at, "monitor+", "m" + (++_monitorSeq)));
+        Log.Write($"Monitor topology: {now.Count} connected ({removed} removed, {added} added)");
         if (removed + added > 0) Restart();
     }
 
@@ -83,11 +88,19 @@ public sealed class KvmDetector : IDisposable
         if (path.Contains("#DISPLAY#", StringComparison.OrdinalIgnoreCase) || path.StartsWith(@"\\?\DISPLAY#", StringComparison.OrdinalIgnoreCase))
             return; // monitors are counted through the topology diff
         bool hid = path.StartsWith(@"\\?\HID#", StringComparison.OrdinalIgnoreCase);
-        _events.Add((DateTime.Now, (hid ? "hid" : "other") + (arrived ? "+" : "-")));
+        _events.Add((DateTime.Now, (hid ? "hid" : "other") + (arrived ? "+" : "-"), path.ToUpperInvariant()));
+        Log.Write($"Device {(arrived ? "arrived" : "removed")}: {(hid ? "input" : "other")} {Shorten(path)}");
         Restart();
     }
 
     private void Restart() { _settle.Stop(); _settle.Start(); }
+
+    /// <summary>\\?\HID#VID_046D&amp;PID_C52B&amp;MI_00#7&amp;1a2b3c4d&amp;0&amp;0000#{guid} → HID#VID_046D&amp;PID_C52B&amp;MI_00</summary>
+    private static string Shorten(string path)
+    {
+        var parts = path.Split('#');
+        return parts.Length >= 3 ? parts[1] + "#" + parts[2] : path;
+    }
 
     private void Evaluate()
     {
@@ -95,7 +108,7 @@ public sealed class KvmDetector : IDisposable
         _events.RemoveAll(e => e.At < cutoff);
         if (_events.Count == 0) return;
 
-        int Count(string kind) => _events.Count(e => e.Kind == kind);
+        int Count(string kind) => _events.Where(e => e.Kind == kind).Select(e => e.Key).Distinct().Count();
         int monOff = Count("monitor-"), monOn = Count("monitor+");
         int hidOff = Count("hid-"), hidOn = Count("hid+");
         int otherOff = Count("other-"), otherOn = Count("other+");
@@ -131,14 +144,37 @@ public sealed class KvmDetector : IDisposable
                 Raise("KVM switch back", $"{monOn} monitor(s) and {hidOn} input device(s) connected within {span:F1} s");
             }
         }
+        else if (hidOff > 0 && otherOff > 0 && otherOff < DockThreshold && monOff == 0)
+        {
+            // Some KVMs switch USB immediately and leave video connected (or drop it later). Input devices
+            // plus their hub vanishing together, without a dock-sized burst, is still the KVM signature.
+            _state.KvmSwitchesAway++; _state.KvmUsbOnly++; _state.LastKvmSwitch = DateTime.Now; _state.Save();
+            Raise("KVM switch away (USB only)", $"{hidOff} input device(s) and {otherOff} hub/other device(s) disconnected within {span:F1} s; monitors stayed connected");
+        }
+        else if (hidOn > 0 && otherOn > 0 && otherOn < DockThreshold && monOn == 0)
+        {
+            _state.KvmSwitchesBack++; _state.KvmUsbOnly++; _state.LastKvmSwitch = DateTime.Now; _state.Save();
+            Raise("KVM switch back (USB only)", $"{hidOn} input device(s) and {otherOn} hub/other device(s) connected within {span:F1} s; monitors were already connected");
+        }
         else if (monOff > 0 || monOn > 0)
         {
             Log.Write($"Monitor change without input-device change ({monOff} off, {monOn} on, hid {hidOff}/{hidOn}, other {otherOff}/{otherOn}): plain plug/unplug, not a KVM");
         }
+        else if (DateTime.Now - _lastRaised < TimeSpan.FromSeconds(15))
+        {
+            // A hub flapping in the wake of a switch we already reported; not worth a line of its own.
+        }
+        else
+        {
+            Log.Write($"Device change without monitor change (hid {hidOff}/{hidOn}, other {otherOff}/{otherOn}): ordinary USB plug/unplug");
+        }
     }
+
+    private DateTime _lastRaised = DateTime.MinValue;
 
     private void Raise(string kind, string detail)
     {
+        _lastRaised = DateTime.Now;
         Log.Write($"{kind}: {detail}");
         try { Detected?.Invoke(kind, detail); } catch { /* ignore */ }
     }
@@ -151,7 +187,8 @@ public sealed class KvmDetector : IDisposable
             return "no KVM pattern seen yet (monitors and input devices have never disconnected together while the app was running)";
         var parts = new List<string>();
         if (switches > 0)
-            parts.Add($"KVM suspected: {_state.KvmSwitchesAway} switch(es) away, {_state.KvmSwitchesBack} back, last {_state.LastKvmSwitch:g}");
+            parts.Add($"KVM suspected: {_state.KvmSwitchesAway} switch(es) away, {_state.KvmSwitchesBack} back, last {_state.LastKvmSwitch:g}" +
+                      (_state.KvmUsbOnly > 0 ? $" ({_state.KvmUsbOnly} switched USB only; the KVM keeps video connected)" : ""));
         if (_state.DockEvents > 0)
             parts.Add($"dock events: {_state.DockEvents}, last {_state.LastDockEvent:g}");
         return string.Join("; ", parts);

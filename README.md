@@ -123,7 +123,8 @@ Refresh, copy to clipboard, or jump to the data folder or log from there.
 Nothing on a PC says "there is a KVM", but a KVM has a signature: every monitor behind it and the USB keyboard
 and mouse disappear in the same instant, and come back together. Monitor Anchor listens for device changes,
 pairs monitor disconnects with input-device disconnects inside a three-second window, and logs the result as
-**KVM switch away** / **KVM switch back** instead of a generic display change. A burst that also takes hubs,
+**KVM switch away** / **KVM switch back** instead of a generic display change. Some KVMs keep the video
+connected and only switch USB; those show up as **KVM switch away (USB only)**. A burst that also takes hubs,
 network or storage with it is logged as **Undocked** / **Docked** instead. Counts are kept across restarts and
 summarised in diagnostics, along with whether the monitors' EDIDs look real or emulated.
 
