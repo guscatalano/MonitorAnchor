@@ -44,6 +44,14 @@ internal static class Program
             return;
         }
 
+        // Diagnostic: list child window classes of windows whose title contains the given text: --classes <text>
+        int clsIdx = Array.FindIndex(args, a => string.Equals(a, "--classes", StringComparison.OrdinalIgnoreCase));
+        if (clsIdx >= 0 && clsIdx + 1 < args.Length)
+        {
+            Log.Write("Window classes for \"" + args[clsIdx + 1] + "\":" + Environment.NewLine + RemoteDesktop.DescribeWindowClasses(args[clsIdx + 1]));
+            return;
+        }
+
         // Diagnostic: log where every window is right now.
         if (args.Any(a => string.Equals(a, "--windows", StringComparison.OrdinalIgnoreCase)))
         {

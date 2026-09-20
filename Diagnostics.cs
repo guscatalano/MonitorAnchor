@@ -69,6 +69,12 @@ public static class Diagnostics
         text.AppendLine($"  idle for {Jiggler.IdleTime().TotalSeconds:F0} s");
         text.AppendLine();
 
+        text.AppendLine("REMOTE DESKTOP WINDOWS");
+        var rdp = RemoteDesktop.FindSessions();
+        if (rdp.Count == 0) text.AppendLine("  none");
+        foreach (var s in rdp) text.AppendLine($"  {(s.FullScreen ? "full-screen" : "windowed  ")} {s.Screen,-14} {s.Process}: {s.Title}");
+        text.AppendLine();
+
         text.AppendLine(WindowSnapshot.Describe("now"));
         return text.ToString();
     }

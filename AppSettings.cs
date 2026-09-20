@@ -24,6 +24,9 @@ public sealed class AppSettings
     public bool JiggleWhenIdle { get; set; } = false;
     public int JiggleIdleSeconds { get; set; } = 60;
 
+    /// <summary>When idle, bring each full-screen Remote Desktop window to the front and press F15 so the remote session stays active.</summary>
+    public bool KeepRdpAlive { get; set; } = false;
+
     /// <summary>Check GitHub for a newer release at startup and daily, and install it automatically.</summary>
     public bool AutoUpdate { get; set; } = true;
 

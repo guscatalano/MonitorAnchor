@@ -29,6 +29,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly StandInManager _standIns = new();
     private readonly ToolStripMenuItem _delayMenu;
     private readonly ToolStripMenuItem _jiggleItem;
+    private readonly ToolStripMenuItem _rdpItem;
     private readonly Jiggler _jiggler = new();
     private readonly ToolStripMenuItem _checkUpdatesItem;
     private readonly ToolStripMenuItem _autoUpdateItem;
@@ -77,7 +78,9 @@ public sealed class TrayApp : ApplicationContext
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
         _jiggleItem = new ToolStripMenuItem("Jiggle mouse when idle", null, (_, _) => ToggleJiggle()) { CheckOnClick = false };
         _jiggler.IdleThreshold = TimeSpan.FromSeconds(Math.Max(10, _settings.JiggleIdleSeconds));
-        _jiggler.Enabled = _settings.JiggleWhenIdle;
+        _jiggler.JiggleMouse = _settings.JiggleWhenIdle;
+        _rdpItem = new ToolStripMenuItem("Keep Remote Desktop sessions alive when idle", null, (_, _) => ToggleRdp()) { CheckOnClick = false };
+        _jiggler.KeepRdpAlive = _settings.KeepRdpAlive;
 
         // Everything about fake monitors lives in one submenu.
         _standInItem = new ToolStripMenuItem("Enabled (stand in for unplugged monitors)", null, (_, _) => ToggleStandIns()) { CheckOnClick = false };
@@ -107,6 +110,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(_enforceItem);
         menu.Items.Add(_keepAwakeItem);
         menu.Items.Add(_jiggleItem);
+        menu.Items.Add(_rdpItem);
         menu.Items.Add(fakeMenu);
         menu.Items.Add(new ToolStripSeparator());
 
@@ -491,6 +495,7 @@ public sealed class TrayApp : ApplicationContext
             item.Checked = (int)item.Tag! == _settings.StandInDelaySeconds;
         _autoUpdateItem.Checked = _settings.AutoUpdate;
         _jiggleItem.Checked = _settings.JiggleWhenIdle;
+        _rdpItem.Checked = _settings.KeepRdpAlive;
         _checkUpdatesItem.Enabled = !_checkingUpdates;
         _checkUpdatesItem.Text = _checkingUpdates ? "Checking for updates..." : "Check for updates now";
         _startupItem.Checked = Startup.IsEnabled();
@@ -536,8 +541,18 @@ public sealed class TrayApp : ApplicationContext
     {
         _settings.JiggleWhenIdle = !_settings.JiggleWhenIdle;
         _settings.Save();
-        _jiggler.Enabled = _settings.JiggleWhenIdle;
+        _jiggler.JiggleMouse = _settings.JiggleWhenIdle;
         Log.Write($"JiggleWhenIdle = {_settings.JiggleWhenIdle} (after {_settings.JiggleIdleSeconds} s idle)");
+        RefreshMenu();
+    }
+
+    private void ToggleRdp()
+    {
+        _settings.KeepRdpAlive = !_settings.KeepRdpAlive;
+        _settings.Save();
+        _jiggler.KeepRdpAlive = _settings.KeepRdpAlive;
+        var sessions = RemoteDesktop.FindSessions();
+        Log.Write($"KeepRdpAlive = {_settings.KeepRdpAlive} (after {_settings.JiggleIdleSeconds} s idle; {sessions.Count} Remote Desktop window(s) open now)");
         RefreshMenu();
     }
 

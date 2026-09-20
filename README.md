@@ -87,6 +87,7 @@ that reconnects. Monitor Anchor keeps the monitor identities and layout stable s
 | Enforce layout on display changes | Automatic restore. Off = the app just sits there. On by default. |
 | Keep displays awake | Hold the display and system idle timers so the screens never turn off. On by default. |
 | Jiggle mouse when idle | After 60 s without keyboard or mouse input, nudges the mouse one pixel and back every half minute so the session and presence indicators keep seeing activity. Off by default. |
+| Keep Remote Desktop sessions alive when idle | After 60 s idle, every open Remote Desktop window (mstsc, the Windows App, or hosts like mRemoteNG that embed the Remote Desktop control), full-screen or windowed, is brought to the front in turn and sent F15, a key no application uses, so each remote session sees input and never idles or locks. The window you had in front is restored afterwards. Minimised sessions cannot receive input and are skipped. Off by default. |
 | Fake monitors ▸ Enabled | When a saved monitor is unplugged, a virtual monitor takes its place at the same resolution and position so the desktop keeps its shape. Off by default; needs the Parsec Virtual Display Driver. |
 | Fake monitors ▸ Delay before a fake monitor appears | Immediately, 5 s, 15 s, 1 min or 5 min (default 10 s). Keeps a quick KVM switch from creating and tearing down fake monitors. |
 | Fake monitors ▸ Install Parsec virtual display driver... | Downloads the signed Parsec driver installer and runs it silently (Windows asks for administrator approval). Reads "installed" once the driver is present. |
@@ -147,6 +148,7 @@ All of these run without a tray icon and exit immediately.
 | `--dump` | Write the diagnostics report to `dump.txt` in the data folder. |
 | `--windows` | Log every visible window's position, size, state and monitor. |
 | `--test-enable` | Check, without changing anything, whether disabled-but-connected monitors could be re-enabled in a targeted way. |
+| `--classes <text>` | Log the child window classes of every window whose title contains the text. Useful for checking whether a remote-desktop host is recognised. |
 
 Data folder: `%LOCALAPPDATA%\MonitorAnchor\` (`profile.json`, `settings.json`, `log.txt`, `dump.txt`).
 The log keeps at most two days of entries (trimmed at startup and hourly) and never grows past 2 MB.
