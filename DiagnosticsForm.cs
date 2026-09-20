@@ -6,12 +6,12 @@ namespace MonitorAnchor;
 public sealed class DiagnosticsForm : Form
 {
     private readonly TextBox _text;
-    private readonly Func<DisplayProfile?> _profile;
+    private readonly Func<LayoutStore> _store;
     private readonly Func<string>? _kvmVerdict;
 
-    public DiagnosticsForm(Func<DisplayProfile?> profile, Func<string>? kvmVerdict = null)
+    public DiagnosticsForm(Func<LayoutStore> store, Func<string>? kvmVerdict = null)
     {
-        _profile = profile;
+        _store = store;
         _kvmVerdict = kvmVerdict;
         Text = "Monitor Anchor diagnostics";
         StartPosition = FormStartPosition.CenterScreen;
@@ -51,7 +51,7 @@ public sealed class DiagnosticsForm : Form
     {
         try
         {
-            _text.Text = Diagnostics.WriteDump(_profile(), _kvmVerdict);
+            _text.Text = Diagnostics.WriteDump(_store(), _kvmVerdict);
         }
         catch (Exception ex)
         {

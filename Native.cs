@@ -240,6 +240,28 @@ internal static class Native
     [DllImport("user32.dll")]
     public static extern int SetDisplayConfig(uint numPathArrayElements, [In] DISPLAYCONFIG_PATH_INFO[] pathArray, uint numModeInfoArrayElements, IntPtr modeInfoArray, uint flags);
 
+    // Undocumented but long-stable: what the Settings page uses for per-monitor scaling. Type values are negative.
+    public const uint DISPLAYCONFIG_DEVICE_INFO_GET_DPI_SCALE = unchecked((uint)-3);
+    public const uint DISPLAYCONFIG_DEVICE_INFO_SET_DPI_SCALE = unchecked((uint)-4);
+
+    /// <summary>Header addresses the SOURCE (adapter + source id). Values are indices relative to the recommended scale.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_SOURCE_DPI_SCALE_GET
+    {
+        public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        public int minScaleRel; public int curScaleRel; public int maxScaleRel;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_SOURCE_DPI_SCALE_SET
+    {
+        public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        public int scaleRel;
+    }
+
+    [DllImport("user32.dll")] public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DPI_SCALE_GET requestPacket);
+    [DllImport("user32.dll")] public static extern int DisplayConfigSetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DPI_SCALE_SET setPacket);
+
     [DllImport("user32.dll")] public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DEVICE_NAME requestPacket);
     [DllImport("user32.dll")] public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_TARGET_DEVICE_NAME requestPacket);
     [DllImport("user32.dll")] public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO requestPacket);

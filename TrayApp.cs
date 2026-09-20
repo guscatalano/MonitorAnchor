@@ -37,6 +37,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _wuMenu;
     private readonly Jiggler _jiggler = new();
     private readonly ToolStripMenuItem _checkUpdatesItem;
+    private readonly ToolStripMenuItem _installItem;
     private readonly ToolStripMenuItem _autoUpdateItem;
     private readonly System.Windows.Forms.Timer _updateTimer;
     private readonly SynchronizationContext _ui;
@@ -51,7 +52,10 @@ public sealed class TrayApp : ApplicationContext
     private readonly System.Windows.Forms.Timer _lateSnapshot;
 
     private readonly AppSettings _settings;
+    private readonly LayoutStore _store;
+    /// <summary>The saved layout that fits the monitors connected right now; null when none does.</summary>
     private DisplayProfile? _profile;
+    private readonly ToolStripMenuItem _layoutsMenu = new("Layouts");
 
     private bool _applying;
     private int _consecutiveFailures;
@@ -65,7 +69,8 @@ public sealed class TrayApp : ApplicationContext
     {
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settings = AppSettings.Load();
-        _profile = DisplayProfile.Load();
+        _store = LayoutStore.Load();
+        _profile = _store.SelectForCurrentMonitors();
         _state = AppState.Load();
         _kvm = new KvmDetector(_state);
         _devices = new DeviceWatcher();
@@ -129,6 +134,7 @@ public sealed class TrayApp : ApplicationContext
         fakeMenu.DropDownItems.Add(new ToolStripSeparator());
         fakeMenu.DropDownItems.Add(_installDriverItem);
 
+        _installItem = new ToolStripMenuItem("Install to Programs folder...", null, (_, _) => InstallOrUninstall());
         _checkUpdatesItem = new ToolStripMenuItem("Check for updates now", null, (_, _) => CheckForUpdates(manual: true));
         _autoUpdateItem = new ToolStripMenuItem("Install updates automatically", null, (_, _) => ToggleAutoUpdate()) { CheckOnClick = false };
 
@@ -139,6 +145,7 @@ public sealed class TrayApp : ApplicationContext
 
         menu.Items.Add(_persistItem);
         menu.Items.Add(_applyItem);
+        menu.Items.Add(_layoutsMenu);
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_enforceItem);
@@ -156,6 +163,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(_startupItem);
         menu.Items.Add(_autoUpdateItem);
         menu.Items.Add(_checkUpdatesItem);
+        menu.Items.Add(_installItem);
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
@@ -207,21 +215,21 @@ public sealed class TrayApp : ApplicationContext
         RefreshMenu();
         ApplyKeepAwake();
         WindowSnapshot.LogNow("startup");
-        Log.Write($"Started. Profile: {(_profile == null ? "none" : $"{_profile.Monitors.Count} monitor(s) from {_profile.CapturedAt}")}, enforce={_settings.Enforce}");
+        OfferInstall();
+        Log.Write($"Started. {_store.Layouts.Count} saved layout(s); active: {(_profile == null ? "none matches the connected monitors" : $"\"{_profile.Name}\" ({_profile.Monitors.Count} monitor(s), captured {_profile.CapturedAt:g})")}; enforce={_settings.Enforce}");
 
         if (ScreenshotMode)
         {
             // nothing to learn or enforce
         }
-        else if (_profile == null)
+        else if (_store.Layouts.Count == 0)
         {
             // First run: learn whatever the layout is right now and enforce it from here on.
             var learned = DisplayManager.CaptureForProfile();
             if (learned.Monitors.Count > 0)
             {
-                learned.Save();
-                _profile = learned;
-                Log.Write("Learned initial layout:" + Environment.NewLine + learned);
+                _profile = _store.Upsert(learned);
+                Log.Write($"Learned initial layout \"{learned.Name}\":" + Environment.NewLine + learned);
                 RefreshMenu();
                 _tray.ShowBalloonTip(6000, "Monitor Anchor",
                     $"Learned your current layout ({learned.Monitors.Count} monitor(s)) and will keep it. " +
@@ -254,11 +262,12 @@ public sealed class TrayApp : ApplicationContext
                 _tray.ShowBalloonTip(4000, "Monitor Anchor", "No active monitors found to capture.", ToolTipIcon.Warning);
                 return;
             }
-            captured.Save();
-            _profile = captured;
-            Log.Write("Persisted layout:" + Environment.NewLine + captured);
-            _tray.ShowBalloonTip(4000, "Layout persisted",
-                $"{captured.Monitors.Count} monitor(s) saved. This layout will be restored whenever displays change.",
+            bool existed = _store.Layouts.Any(l => LayoutStore.Signature(l) == LayoutStore.Signature(captured));
+            _store.Upsert(captured);
+            RefreshActiveLayout();
+            Log.Write($"Persisted layout \"{captured.Name}\" ({(existed ? "updated" : "new")}):" + Environment.NewLine + captured);
+            _tray.ShowBalloonTip(4000, existed ? "Layout updated" : "Layout saved",
+                $"\"{captured.Name}\": {captured.Monitors.Count} monitor(s). It is restored whenever these monitors are connected and something changes.",
                 ToolTipIcon.Info);
             RefreshMenu();
         }
@@ -271,9 +280,13 @@ public sealed class TrayApp : ApplicationContext
 
     private void ApplyNow(bool manual)
     {
+        RefreshActiveLayout();
         if (_profile == null)
         {
-            if (manual) _tray.ShowBalloonTip(4000, "Monitor Anchor", "Nothing saved yet. Choose \"Persist current layout\" first.", ToolTipIcon.Warning);
+            if (manual)
+                _tray.ShowBalloonTip(4000, "Monitor Anchor", _store.Layouts.Count == 0
+                    ? "Nothing saved yet. Choose \"Persist current layout\" first."
+                    : "No saved layout matches the monitors connected right now. Arrange them and choose \"Persist current layout\" to add one.", ToolTipIcon.Warning);
             return;
         }
         if (_applying) return;
@@ -339,12 +352,83 @@ public sealed class TrayApp : ApplicationContext
         }
     }
 
+    // ---- Layouts ------------------------------------------------------------------------------------
+
+    /// <summary>Re-selects the layout for the monitors connected now and logs when it changes.</summary>
+    private void RefreshActiveLayout()
+    {
+        var before = _profile;
+        _profile = _store.SelectForCurrentMonitors();
+        if (!ReferenceEquals(before, _profile))
+            Log.Write($"Active layout: {(_profile == null ? "none matches the connected monitors" : $"\"{_profile.Name}\"")}");
+    }
+
+    private void BuildLayoutsMenu()
+    {
+        _layoutsMenu.DropDownItems.Clear();
+        if (_store.Layouts.Count == 0)
+        {
+            _layoutsMenu.DropDownItems.Add(new ToolStripMenuItem("No layouts saved yet") { Enabled = false });
+            return;
+        }
+        foreach (var layout in _store.Layouts)
+        {
+            var l = layout;
+            var item = new ToolStripMenuItem($"{l.Name}  ({l.Monitors.Count} monitor{(l.Monitors.Count == 1 ? "" : "s")})") { Checked = ReferenceEquals(l, _profile) };
+            item.DropDownItems.Add(new ToolStripMenuItem("Apply now", null, (_, _) => ApplyLayout(l)));
+            item.DropDownItems.Add(new ToolStripMenuItem("Rename...", null, (_, _) => RenameLayout(l)));
+            item.DropDownItems.Add(new ToolStripMenuItem("Delete", null, (_, _) => DeleteLayout(l)));
+            _layoutsMenu.DropDownItems.Add(item);
+        }
+        _layoutsMenu.DropDownItems.Add(new ToolStripSeparator());
+        _layoutsMenu.DropDownItems.Add(new ToolStripMenuItem("The layout whose monitors are all connected is applied; more monitors win.") { Enabled = false });
+    }
+
+    /// <summary>Pushes a specific layout regardless of which one is active; monitors it names that are absent are skipped.</summary>
+    private void ApplyLayout(DisplayProfile layout)
+    {
+        if (_applying) return;
+        _applying = true;
+        try
+        {
+            var result = DisplayManager.Apply(layout);
+            Log.Write($"Apply layout \"{layout.Name}\" (manual): {result.Summary}");
+            _tray.ShowBalloonTip(4000, $"Layout \"{layout.Name}\"", result.Summary, result.HadFailures ? ToolTipIcon.Warning : ToolTipIcon.Info);
+        }
+        finally { _applying = false; }
+    }
+
+    private void RenameLayout(DisplayProfile layout)
+    {
+        string name = Microsoft.VisualBasic.Interaction.InputBox("New name for this layout:", "Rename layout", layout.Name);
+        if (string.IsNullOrWhiteSpace(name) || name == layout.Name) return;
+        _store.Rename(layout, name);
+        Log.Write($"Renamed layout to \"{layout.Name}\"");
+        RefreshMenu();
+    }
+
+    private void DeleteLayout(DisplayProfile layout)
+    {
+        if (MessageBox.Show($"Delete layout \"{layout.Name}\"?\n\n{layout}", "Monitor Anchor", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        _store.Remove(layout);
+        Log.Write($"Deleted layout \"{layout.Name}\"");
+        RefreshActiveLayout();
+        RefreshMenu();
+    }
+
     private void ShowSaved()
     {
-        string text = _profile == null
-            ? "No layout has been persisted yet."
-            : $"Saved {_profile.CapturedAt:g}{Environment.NewLine}{Environment.NewLine}{_profile}{Environment.NewLine}{Environment.NewLine}File: {DisplayProfile.ProfilePath}";
-        MessageBox.Show(text, "Monitor Anchor - saved layout", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        var sb = new System.Text.StringBuilder();
+        if (_store.Layouts.Count == 0) sb.AppendLine("No layout has been saved yet.");
+        foreach (var l in _store.Layouts)
+        {
+            sb.AppendLine($"{l.Name}{(ReferenceEquals(l, _profile) ? "   (active now)" : "")}   saved {l.CapturedAt:g}");
+            sb.AppendLine(l.ToString());
+            sb.AppendLine();
+        }
+        if (_store.Layouts.Count > 0 && _profile == null) sb.AppendLine("None of these matches the monitors connected right now.").AppendLine();
+        sb.Append("File: ").Append(LayoutStore.Path);
+        MessageBox.Show(sb.ToString(), "Monitor Anchor - saved layouts", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private AboutForm? _about;
@@ -366,7 +450,7 @@ public sealed class TrayApp : ApplicationContext
     {
         if (_diagnostics == null || _diagnostics.IsDisposed)
         {
-            _diagnostics = new DiagnosticsForm(() => _profile, _kvm.Verdict);
+            _diagnostics = new DiagnosticsForm(() => _store, _kvm.Verdict);
             _diagnostics.Show();
         }
         else
@@ -534,6 +618,7 @@ public sealed class TrayApp : ApplicationContext
     {
         bool hasProfile = _profile != null;
         _applyItem.Enabled = hasProfile;
+        BuildLayoutsMenu();
         _enforceItem.Checked = _settings.Enforce;
         _keepAwakeItem.Checked = _settings.KeepAwake;
         _standInItem.Checked = _settings.VirtualStandIns;
@@ -553,10 +638,12 @@ public sealed class TrayApp : ApplicationContext
         _wuStatusItem.Text = pausedUntil == null ? "Updates are not paused" : $"Paused until {pausedUntil:g}";
         _checkUpdatesItem.Enabled = !_checkingUpdates;
         _checkUpdatesItem.Text = _checkingUpdates ? "Checking for updates..." : "Check for updates now";
+        _installItem.Text = Installer.IsInstalled ? "Uninstall..." : "Install to Programs folder...";
         _startupItem.Checked = Startup.IsEnabled();
 
-        string state = !hasProfile ? "no layout saved"
-                     : _settings.Enforce ? $"enforcing {_profile!.Monitors.Count} monitor(s)" +
+        string state = _store.Layouts.Count == 0 ? "no layout saved"
+                     : !hasProfile ? "no layout for these monitors"
+                     : _settings.Enforce ? $"{_profile!.Name}" +
                                            (_standIns.ActiveStandIns > 0 ? $", {_standIns.ActiveStandIns} fake" : "")
                      : "paused";
         _tray.Text = Truncate($"Monitor Anchor - {state}", 63); // NotifyIcon.Text is limited to 63 chars
@@ -585,7 +672,7 @@ public sealed class TrayApp : ApplicationContext
 
     private void ScheduleApply(string reason, int delayMs = DebounceMs)
     {
-        if (!_settings.Enforce || _profile == null) return;
+        if (!_settings.Enforce || _store.Layouts.Count == 0) return;
         Log.Write($"Display change detected ({reason}); checking in {delayMs} ms");
         _debounce.Stop();
         _debounce.Interval = delayMs;
@@ -646,6 +733,61 @@ public sealed class TrayApp : ApplicationContext
         _standIns.Delay = TimeSpan.FromSeconds(seconds);
         Log.Write($"StandInDelaySeconds = {seconds}");
         RefreshMenu();
+    }
+
+    // ---- Install ------------------------------------------------------------------------------------
+
+    /// <summary>First run from Downloads, the desktop or a temp folder: offer a permanent home once.</summary>
+    private void OfferInstall()
+    {
+        if (ScreenshotMode || _settings.InstallOfferAnswered || !Installer.LooksTemporary) return;
+        _settings.InstallOfferAnswered = true;
+        _settings.Save();
+        var answer = MessageBox.Show(
+            $"Monitor Anchor is running from\n{Environment.ProcessPath}\n\nInstall it to your Programs folder so it has a permanent home, a Start Menu entry and starts with Windows?\n\n" +
+            $"({Installer.InstallDir})",
+            "Install Monitor Anchor?", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (answer == DialogResult.Yes) DoInstall();
+    }
+
+    private void InstallOrUninstall()
+    {
+        if (!Installer.IsInstalled)
+        {
+            if (MessageBox.Show($"Copy Monitor Anchor to {Installer.InstallDir}, add a Start Menu shortcut, register it to start with Windows, and restart from there?",
+                    "Install Monitor Anchor", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                DoInstall();
+            return;
+        }
+        var choice = MessageBox.Show(
+            "Uninstall Monitor Anchor?\n\nYes: remove the program, shortcut and startup entry but keep your saved layouts and settings.\nNo: remove everything including saved layouts.\nCancel: keep it.",
+            "Uninstall Monitor Anchor", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (choice == DialogResult.Cancel) return;
+        try
+        {
+            Installer.Uninstall(removeData: choice == DialogResult.No);
+            ExitThread();
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Uninstall failed: " + ex);
+            _tray.ShowBalloonTip(5000, "Monitor Anchor", "Uninstall failed: " + ex.Message, ToolTipIcon.Error);
+        }
+    }
+
+    private void DoInstall()
+    {
+        try
+        {
+            string exe = Installer.Install();
+            Process.Start(new ProcessStartInfo(exe, $"--wait-for {Environment.ProcessId}") { UseShellExecute = false });
+            ExitThread();
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Install failed: " + ex);
+            _tray.ShowBalloonTip(5000, "Monitor Anchor", "Install failed: " + ex.Message, ToolTipIcon.Error);
+        }
     }
 
     // ---- Updates ------------------------------------------------------------------------------------
@@ -741,7 +883,7 @@ public sealed class TrayApp : ApplicationContext
     private void OnDebounceElapsed()
     {
         _debounce.Stop();
-        if (!_settings.Enforce || _profile == null) return;
+        if (!_settings.Enforce || _store.Layouts.Count == 0) return;
         if (DateTime.Now < _backoffUntil)
         {
             Log.Write("Skipping automatic apply (backoff active)");
@@ -843,7 +985,7 @@ public sealed class TrayApp : ApplicationContext
         fake.HideDropDown();
         _menu.Close();
 
-        using var form = new DiagnosticsForm(() => _profile, _kvm.Verdict);
+        using var form = new DiagnosticsForm(() => _store, _kvm.Verdict);
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(50, 50);
         form.TopMost = true; // we are not the foreground app, so force the window above whatever is there

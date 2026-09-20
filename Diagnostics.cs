@@ -7,16 +7,22 @@ public static class Diagnostics
 {
     public static string DumpPath => Path.Combine(DisplayProfile.ConfigDir, "dump.txt");
 
-    public static string Build(DisplayProfile? saved, Func<string>? kvmVerdict = null)
+    public static string Build(LayoutStore store, Func<string>? kvmVerdict = null)
     {
+        var saved = store.SelectForCurrentMonitors();
         var text = new StringBuilder();
         text.AppendLine($"Monitor Anchor {Updater.Current} ({Updater.AssetName})  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         text.AppendLine($"Data folder: {DisplayProfile.ConfigDir}");
         text.AppendLine();
 
-        text.AppendLine("SAVED LAYOUT");
-        text.AppendLine(saved == null ? "  (none)" : Indent(saved.ToString()));
-        if (saved != null) text.AppendLine($"  captured {saved.CapturedAt:g}");
+        text.AppendLine($"SAVED LAYOUTS ({store.Layouts.Count})");
+        if (store.Layouts.Count == 0) text.AppendLine("  (none)");
+        foreach (var l in store.Layouts)
+        {
+            text.AppendLine($"  {l.Name}{(ReferenceEquals(l, saved) ? "   <- active for the connected monitors" : "")}   (captured {l.CapturedAt:g})");
+            text.AppendLine(Indent(Indent(l.ToString())));
+        }
+        if (saved == null) text.AppendLine("  no saved layout matches the monitors connected right now");
         text.AppendLine();
 
         var live = DisplayManager.CaptureAll();
@@ -26,6 +32,13 @@ public static class Diagnostics
 
         text.AppendLine("MONITOR IDS");
         foreach (var m in live.Monitors) text.AppendLine($"  {m.MonitorName,-20} {m.MonitorId}");
+        text.AppendLine();
+
+        text.AppendLine("SCALING (per adapter output)");
+        var scaling = DpiScaling.QueryAll();
+        if (scaling.Count == 0) text.AppendLine("  not readable");
+        foreach (var (name, d) in scaling)
+            text.AppendLine(d.Percent > 0 ? $"  {name}: {d.Percent}% (recommended {d.Recommended}%, up to {d.Max}%) [{d.Raw}]" : $"  {name}: not readable [{d.Raw}]");
         text.AppendLine();
 
         text.AppendLine("HDR (per adapter output)");
@@ -80,9 +93,9 @@ public static class Diagnostics
     }
 
     /// <summary>Writes the report to dump.txt and returns it.</summary>
-    public static string WriteDump(DisplayProfile? saved, Func<string>? kvmVerdict = null)
+    public static string WriteDump(LayoutStore store, Func<string>? kvmVerdict = null)
     {
-        string report = Build(saved, kvmVerdict);
+        string report = Build(store, kvmVerdict);
         Directory.CreateDirectory(DisplayProfile.ConfigDir);
         File.WriteAllText(DumpPath, report);
         return report;

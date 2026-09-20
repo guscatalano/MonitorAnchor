@@ -14,6 +14,11 @@ public static class DisplayManager
     {
         var profile = new DisplayProfile { CapturedAt = DateTime.Now };
         var hdr = HdrManager.QueryAll();
+        var dpi = DpiScaling.QueryAll();
+        // DisplayConfig knows the monitor's real model name ("VG259QM"); the legacy API only says "Generic PnP Monitor".
+        var friendly = Topology.ConnectedMonitors()
+            .GroupBy(t => t.MonitorId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().FriendlyName, StringComparer.OrdinalIgnoreCase);
 
         for (uint i = 0; ; i++)
         {
@@ -32,6 +37,7 @@ public static class DisplayManager
                 if (!string.IsNullOrWhiteSpace(monitor.DeviceString)) monitorName = monitor.DeviceString;
             }
             if (string.IsNullOrEmpty(monitorId)) monitorId = "ADAPTER:" + adapter.DeviceName;
+            if (friendly.TryGetValue(monitorId, out var better) && !string.IsNullOrWhiteSpace(better)) monitorName = better;
 
             var dm = Native.DEVMODE.Create();
             if (!Native.EnumDisplaySettingsEx(adapter.DeviceName, Native.ENUM_CURRENT_SETTINGS, ref dm, 0))
@@ -60,6 +66,7 @@ public static class DisplayManager
                 entry.HdrSupported = h.Supported;
                 entry.HdrEnabled = h.Enabled;
             }
+            if (dpi.TryGetValue(adapter.DeviceName, out var d)) entry.DpiScale = d.Percent;
             profile.Monitors.Add(entry);
         }
 
@@ -126,18 +133,30 @@ public static class DisplayManager
             changed += c; failed += f; lines.AddRange(pushLines);
         }
 
-        // HDR: adapter names and targets can shift after a topology change, so re-read before reconciling.
+        // HDR and scaling: adapter names and targets can shift after a topology change, so re-read before reconciling.
         var after = pending.Count > 0 ? Capture() : current;
         foreach (var live in after.Monitors.Where(m => m.IsActive))
         {
             var want = saved.FindFor(live);
-            if (want == null || !want.HdrSupported || !live.HdrSupported || want.HdrEnabled == live.HdrEnabled) continue;
+            if (want == null) continue;
 
-            string status = HdrManager.Set(live.AdapterName, want.HdrEnabled);
-            string line = $"{live.MonitorName} ({live.AdapterName}): HDR {(live.HdrEnabled ? "on" : "off")} -> {(want.HdrEnabled ? "on" : "off")} : {status}";
-            Log.Write(line);
-            lines.Add(line);
-            if (status.StartsWith("success")) changed++; else failed++;
+            if (want.HdrSupported && live.HdrSupported && want.HdrEnabled != live.HdrEnabled)
+            {
+                string status = HdrManager.Set(live.AdapterName, want.HdrEnabled);
+                string line = $"{live.MonitorName} ({live.AdapterName}): HDR {(live.HdrEnabled ? "on" : "off")} -> {(want.HdrEnabled ? "on" : "off")} : {status}";
+                Log.Write(line);
+                lines.Add(line);
+                if (status.StartsWith("success")) changed++; else failed++;
+            }
+
+            if (want.DpiScale > 0 && live.DpiScale > 0 && want.DpiScale != live.DpiScale)
+            {
+                string status = DpiScaling.Set(live.AdapterName, want.DpiScale);
+                string line = $"{live.MonitorName} ({live.AdapterName}): scale {live.DpiScale}% -> {want.DpiScale}% : {status}";
+                Log.Write(line);
+                lines.Add(line);
+                if (status.StartsWith("success")) changed++; else failed++;
+            }
         }
 
         if (lines.Count == 0)

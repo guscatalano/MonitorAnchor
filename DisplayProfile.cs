@@ -26,6 +26,9 @@ public sealed class MonitorSettings
     /// <summary>Whether HDR was switched on when captured. Only enforced when HdrSupported is true.</summary>
     public bool HdrEnabled { get; set; }
 
+    /// <summary>Display scaling percentage (100, 125, 150, ...) when captured; 0 = unknown, never enforced.</summary>
+    public int DpiScale { get; set; }
+
     /// <summary>Runtime only: false when the monitor is connected but not part of the desktop (disabled).</summary>
     [JsonIgnore]
     public bool IsActive { get; set; } = true;
@@ -42,12 +45,14 @@ public sealed class MonitorSettings
     public override string ToString() => !IsActive
         ? $"{MonitorName} [{AdapterName}] connected but disabled"
         : $"{MonitorName} [{AdapterName}] {Width}x{Height} @ {RefreshRate}Hz, pos ({PositionX},{PositionY}), rot {Orientation * 90}\u00B0" +
-          $"{(IsPrimary ? ", primary" : "")}{(HdrSupported ? (HdrEnabled ? ", HDR on" : ", HDR off") : "")}";
+          $"{(IsPrimary ? ", primary" : "")}{(DpiScale > 0 ? $", {DpiScale}%" : "")}{(HdrSupported ? (HdrEnabled ? ", HDR on" : ", HDR off") : "")}";
 }
 
 /// <summary>A snapshot of every active monitor, plus persistence helpers.</summary>
 public sealed class DisplayProfile
 {
+    /// <summary>User-visible name; generated from the monitor names unless renamed.</summary>
+    public string Name { get; set; } = string.Empty;
     public DateTime CapturedAt { get; set; }
     public List<MonitorSettings> Monitors { get; set; } = new();
 

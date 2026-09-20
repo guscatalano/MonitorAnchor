@@ -30,6 +30,9 @@ public sealed class AppSettings
     /// <summary>When idle, hover and nudge the mouse over every visible window so hover-sensitive apps see activity.</summary>
     public bool WiggleAllWindows { get; set; } = false;
 
+    /// <summary>Set once the user has answered the "install to Programs folder?" offer, so it is not asked again.</summary>
+    public bool InstallOfferAnswered { get; set; } = false;
+
     /// <summary>Check GitHub for a newer release at startup and daily, and install it automatically.</summary>
     public bool AutoUpdate { get; set; } = true;
 

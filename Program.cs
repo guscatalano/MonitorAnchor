@@ -19,7 +19,7 @@ internal static class Program
         // Diagnostic mode: write the current layout to a file and exit. Handy for bug reports.
         if (args.Any(a => string.Equals(a, "--dump", StringComparison.OrdinalIgnoreCase)))
         {
-            Diagnostics.WriteDump(DisplayProfile.Load());
+            Diagnostics.WriteDump(LayoutStore.Load());
             return;
         }
 
@@ -41,6 +41,19 @@ internal static class Program
             var app = new TrayApp();
             app.SaveScreenshots(args[shotIdx + 1]);
             app.ExitThread();
+            return;
+        }
+
+        // --install copies this exe to %LOCALAPPDATA%\Programs\MonitorAnchor, adds a Start Menu shortcut and startup entry, and starts it.
+        if (args.Any(a => string.Equals(a, "--install", StringComparison.OrdinalIgnoreCase)))
+        {
+            string exe = Installer.Install();
+            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+            return;
+        }
+        if (args.Any(a => string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase)))
+        {
+            Installer.Uninstall(removeData: args.Any(a => string.Equals(a, "--purge", StringComparison.OrdinalIgnoreCase)));
             return;
         }
 
@@ -78,15 +91,14 @@ internal static class Program
         // Scriptable equivalents of the tray menu items.
         if (args.Any(a => string.Equals(a, "--persist", StringComparison.OrdinalIgnoreCase)))
         {
-            var captured = DisplayManager.CaptureForProfile();
-            captured.Save();
-            Log.Write("Persisted layout (command line):" + Environment.NewLine + captured);
+            var captured = LayoutStore.Load().Upsert(DisplayManager.CaptureForProfile());
+            Log.Write($"Persisted layout \"{captured.Name}\" (command line):" + Environment.NewLine + captured);
             return;
         }
         if (args.Any(a => string.Equals(a, "--apply", StringComparison.OrdinalIgnoreCase)))
         {
-            var saved = DisplayProfile.Load();
-            if (saved == null) { Log.Write("--apply: no saved profile"); return; }
+            var saved = LayoutStore.Load().SelectForCurrentMonitors();
+            if (saved == null) { Log.Write("--apply: no saved layout matches the connected monitors"); return; }
             var result = DisplayManager.Apply(saved);
             Log.Write("Apply (command line): " + result.Summary);
             return;

@@ -7,10 +7,11 @@ public sealed record HdrInfo(bool Supported, bool Enabled, string Raw = "");
 /// <summary>Reads and sets per-monitor HDR state through the DisplayConfig (CCD) API.</summary>
 public static class HdrManager
 {
-    private readonly record struct Target(Native.LUID AdapterId, uint TargetId);
+    /// <summary>A DisplayConfig path: the target (monitor) and the source (GDI display) driving it.</summary>
+    internal readonly record struct Target(Native.LUID AdapterId, uint TargetId, Native.LUID SourceAdapterId, uint SourceId);
 
     /// <summary>Maps each active GDI device name (\\.\DISPLAYn) to its DisplayConfig target.</summary>
-    private static Dictionary<string, Target> MapActiveTargets()
+    internal static Dictionary<string, Target> MapActiveTargets()
     {
         var map = new Dictionary<string, Target>(StringComparer.OrdinalIgnoreCase);
         try
@@ -34,7 +35,7 @@ public static class HdrManager
                     viewGdiDeviceName = string.Empty,
                 };
                 if (Native.DisplayConfigGetDeviceInfo(ref src) != 0) continue;
-                map[src.viewGdiDeviceName] = new Target(paths[i].targetInfo.adapterId, paths[i].targetInfo.id);
+                map[src.viewGdiDeviceName] = new Target(paths[i].targetInfo.adapterId, paths[i].targetInfo.id, paths[i].sourceInfo.adapterId, paths[i].sourceInfo.id);
             }
         }
         catch (Exception ex)

@@ -23,11 +23,15 @@ public static class Startup
         return key?.GetValue(ValueName) is string s && !string.Equals(s, CommandLine, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static void Enable()
+    public static void Enable() => EnableFor(Environment.ProcessPath ?? "");
+
+    /// <summary>Registers a specific exe path (used when installing, before the installed copy runs).</summary>
+    public static void EnableFor(string exePath)
     {
+        string command = $"\"{exePath}\"";
         using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);
-        key.SetValue(ValueName, CommandLine, RegistryValueKind.String);
-        Log.Write($"Startup enabled: {CommandLine}");
+        key.SetValue(ValueName, command, RegistryValueKind.String);
+        Log.Write($"Startup enabled: {command}");
     }
 
     public static void Disable()

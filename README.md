@@ -6,7 +6,7 @@
 
 <p align="center">
   A tiny Windows tray utility that pins your monitor layout.<br>
-  Resolution, refresh rate, position, orientation and HDR stay the way you set them, no matter what Windows does.
+  Resolution, refresh rate, position, orientation, scaling and HDR stay the way you set them, no matter what Windows does.
 </p>
 
 <p align="center">
@@ -79,6 +79,7 @@ that reconnects. Monitor Anchor keeps the monitor identities and layout stable s
 | --- | --- |
 | **Persist current layout** | Snapshot every active monitor's mode and HDR state and save it. Double-clicking the icon does the same. |
 | Apply saved layout now | Force a restore immediately. |
+| Layouts ▸ | Every saved layout, one per set of monitors, with the active one ticked. Each has Apply now, Rename and Delete. The active layout is the saved one whose monitors are all connected; when several qualify, the one covering more monitors wins. So a desk layout, a laptop-only layout and a projector layout coexist and switch automatically. **Persist current layout** updates the layout for the current set of monitors or adds a new one. |
 
 **Behaviours** (checkmarks)
 
@@ -109,6 +110,7 @@ that reconnects. Monitor Anchor keeps the monitor identities and layout stable s
 | Start with Windows | Run-key registration (on by default after first launch). |
 | Install updates automatically | Checks 30 s after start and then daily; a newer release is downloaded (the build matching yours), verified against its size and SHA-256 digest, swapped in place and restarted. On by default. |
 | Check for updates now | Asks GitHub for the latest release right away and offers to install it. |
+| Install to Programs folder... / Uninstall... | Copies the exe to `%LOCALAPPDATA%\Programs\MonitorAnchor`, adds a Start Menu shortcut and the startup entry, and restarts from there. No administrator rights needed. Offered automatically the first time the app runs from Downloads, the desktop or a temp folder. Uninstall removes the program, shortcut and startup entry, and optionally the saved layouts. |
 | Exit | Quit. Releases the keep-awake hold and retires any fake monitors. |
 
 ### Diagnostics
@@ -145,15 +147,16 @@ All of these run without a tray icon and exit immediately.
 
 | Switch | Effect |
 | --- | --- |
-| `--persist` | Save the current layout as the profile. |
-| `--apply` | Restore the saved profile once. |
+| `--persist` | Save the current layout (adds a layout for this set of monitors, or updates it). |
+| `--apply` | Restore the layout matching the connected monitors once. |
+| `--install` / `--uninstall [--purge]` | Install to the Programs folder and start from there; uninstall (with `--purge`, also delete saved layouts and settings). |
 | `--dump` | Write the diagnostics report to `dump.txt` in the data folder. |
 | `--windows` | Log every visible window's position, size, state and monitor. |
 | `--test-enable` | Check, without changing anything, whether disabled-but-connected monitors could be re-enabled in a targeted way. |
 | `--pause-updates <days>` | Elevated helper used by the Windows Update menu (0 resumes). Run it yourself from an administrator prompt if you prefer. |
 | `--classes <text>` | Log the child window classes of every window whose title contains the text. Useful for checking whether a remote-desktop host is recognised. |
 
-Data folder: `%LOCALAPPDATA%\MonitorAnchor\` (`profile.json`, `settings.json`, `log.txt`, `dump.txt`).
+Data folder: `%LOCALAPPDATA%\MonitorAnchor\` (`layouts.json`, `settings.json`, `state.json`, `log.txt`, `dump.txt`).
 The log keeps at most two days of entries (trimmed at startup and hourly) and never grows past 2 MB.
 
 ## Fake monitors
@@ -204,14 +207,16 @@ dotnet publish -c Release -o publish-sc -p:SelfContained=true          # runtime
      `ChangeDisplaySettingsEx` with `CDS_NORESET`, committing everything in one call. If a display rejects the exact
      refresh rate, resolution and position are still applied.
   3. Reconciles HDR per monitor through `DisplayConfigSetDeviceInfo` (the Windows 11 24H2 HDR call first, then the
-     older advanced-colour call), only on monitors that reported HDR support when the profile was saved.
+     older advanced-colour call), only on monitors that reported HDR support when the layout was saved, and the
+     display scaling percentage through the undocumented but long-stable DPI-scale device-info calls the Settings
+     page itself uses.
 * Restoring triggers another change event; that pass finds everything matching and does nothing. If the driver
   rejects a mode three times in a row, automatic apply pauses for a minute.
 * Keep-awake uses `SetThreadExecutionState`; the jiggler uses `GetLastInputInfo` and `SendInput`.
 * Updates come from the GitHub releases API. A running exe cannot be overwritten but it can be renamed, so the old
   file is parked as `.old`, the new one moved into place and started, and the parked file deleted on the next start.
 
-Not covered: DPI scaling, colour depth other than what was saved, and clone/duplicate topologies.
+Not covered: colour depth other than what was saved, and clone/duplicate topologies.
 
 ## About
 
