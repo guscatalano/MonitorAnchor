@@ -12,6 +12,12 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _persistItem;
     private readonly ToolStripMenuItem _applyItem;
     private readonly ToolStripMenuItem _showItem;
+    private readonly ContextMenuStrip _menu;
+
+    /// <summary>Set by --screenshots: build the UI without registering startup, learning a layout or enforcing anything.</summary>
+    public static bool ScreenshotMode;
+    private readonly ToolStripMenuItem _diagnosticsItem;
+    private DiagnosticsForm? _diagnostics;
     private readonly ToolStripMenuItem _enforceItem;
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _keepAwakeItem;
@@ -58,46 +64,61 @@ public sealed class TrayApp : ApplicationContext
         };
         _applyItem = new ToolStripMenuItem("Apply saved layout now", null, (_, _) => ApplyNow(manual: true));
         _showItem = new ToolStripMenuItem("Show saved layout...", null, (_, _) => ShowSaved());
+        _diagnosticsItem = new ToolStripMenuItem("Show diagnostics...", null, (_, _) => ShowDiagnostics());
         _enforceItem = new ToolStripMenuItem("Enforce layout on display changes", null, (_, _) => ToggleEnforce()) { CheckOnClick = false };
         _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup()) { CheckOnClick = false };
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
-        _standInItem = new ToolStripMenuItem("Fake monitors when real ones unplug", null, (_, _) => ToggleStandIns()) { CheckOnClick = false };
-        _installDriverItem = new ToolStripMenuItem("Install Parsec virtual display driver...", null, (_, _) => InstallDriver());
-        _delayMenu = new ToolStripMenuItem("Fake monitor delay");
-        foreach (var (label, seconds) in DelayPresets)
-            _delayMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => SetStandInDelay(seconds)) { Tag = seconds });
-        _checkUpdatesItem = new ToolStripMenuItem("Check for updates now", null, (_, _) => CheckForUpdates(manual: true));
-        _autoUpdateItem = new ToolStripMenuItem("Install updates automatically", null, (_, _) => ToggleAutoUpdate()) { CheckOnClick = false };
-        _standIns.Delay = TimeSpan.FromSeconds(Math.Max(0, _settings.StandInDelaySeconds));
-        _jiggleItem = new ToolStripMenuItem("Jiggle mouse when idle (stay \"active\")", null, (_, _) => ToggleJiggle()) { CheckOnClick = false };
+        _jiggleItem = new ToolStripMenuItem("Jiggle mouse when idle", null, (_, _) => ToggleJiggle()) { CheckOnClick = false };
         _jiggler.IdleThreshold = TimeSpan.FromSeconds(Math.Max(10, _settings.JiggleIdleSeconds));
         _jiggler.Enabled = _settings.JiggleWhenIdle;
 
-        var menu = new ContextMenuStrip();
+        // Everything about fake monitors lives in one submenu.
+        _standInItem = new ToolStripMenuItem("Enabled (stand in for unplugged monitors)", null, (_, _) => ToggleStandIns()) { CheckOnClick = false };
+        _delayMenu = new ToolStripMenuItem("Delay before a fake monitor appears");
+        foreach (var (label, seconds) in DelayPresets)
+            _delayMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => SetStandInDelay(seconds)) { Tag = seconds });
+        _installDriverItem = new ToolStripMenuItem("Install Parsec virtual display driver...", null, (_, _) => InstallDriver());
+        _standIns.Delay = TimeSpan.FromSeconds(Math.Max(0, _settings.StandInDelaySeconds));
+        var fakeMenu = new ToolStripMenuItem("Fake monitors");
+        fakeMenu.DropDownItems.Add(_standInItem);
+        fakeMenu.DropDownItems.Add(_delayMenu);
+        fakeMenu.DropDownItems.Add(new ToolStripSeparator());
+        fakeMenu.DropDownItems.Add(_installDriverItem);
+
+        _checkUpdatesItem = new ToolStripMenuItem("Check for updates now", null, (_, _) => CheckForUpdates(manual: true));
+        _autoUpdateItem = new ToolStripMenuItem("Install updates automatically", null, (_, _) => ToggleAutoUpdate()) { CheckOnClick = false };
+
+        // Layout: title / actions / behaviours / views / app settings / exit.
+        var menu = _menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem($"Monitor Anchor {Updater.Current}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
+
         menu.Items.Add(_persistItem);
         menu.Items.Add(_applyItem);
-        menu.Items.Add(_showItem);
         menu.Items.Add(new ToolStripSeparator());
+
         menu.Items.Add(_enforceItem);
         menu.Items.Add(_keepAwakeItem);
         menu.Items.Add(_jiggleItem);
-        menu.Items.Add(_standInItem);
-        menu.Items.Add(_installDriverItem);
-        menu.Items.Add(_delayMenu);
-        menu.Items.Add(_startupItem);
+        menu.Items.Add(fakeMenu);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_checkUpdatesItem);
-        menu.Items.Add(_autoUpdateItem);
-        menu.Items.Add(new ToolStripSeparator());
+
+        menu.Items.Add(_showItem);
+        menu.Items.Add(_diagnosticsItem);
         menu.Items.Add(new ToolStripMenuItem("Open log", null, (_, _) => OpenLog()));
+        menu.Items.Add(new ToolStripSeparator());
+
+        menu.Items.Add(_startupItem);
+        menu.Items.Add(_autoUpdateItem);
+        menu.Items.Add(_checkUpdatesItem);
+        menu.Items.Add(new ToolStripSeparator());
+
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
         menu.Opening += (_, _) => RefreshMenu();
 
         _tray = new NotifyIcon
         {
-            Icon = MakeIcon(),
+            Icon = AppIcon(),
             ContextMenuStrip = menu,
             Visible = true,
         };
@@ -113,7 +134,7 @@ public sealed class TrayApp : ApplicationContext
             _updateTimer.Interval = (int)TimeSpan.FromHours(24).TotalMilliseconds;
             if (_settings.AutoUpdate) CheckForUpdates(manual: false);
         };
-        _updateTimer.Start();
+        if (!ScreenshotMode) _updateTimer.Start();
 
         // Windows' own "remember window locations" restore can land a few seconds after a reconnect.
         _lateSnapshot = new System.Windows.Forms.Timer { Interval = 5000 };
@@ -124,7 +145,11 @@ public sealed class TrayApp : ApplicationContext
         SystemEvents.SessionSwitch += OnSessionSwitch;
 
         // First run: register for startup so the tool survives reboots without any extra clicks.
-        if (!AppSettings.Exists)
+        if (ScreenshotMode)
+        {
+            // Rendering screenshots for the README: no side effects on the machine.
+        }
+        else if (!AppSettings.Exists)
         {
             _settings.Save();
             Startup.Enable();
@@ -139,7 +164,11 @@ public sealed class TrayApp : ApplicationContext
         WindowSnapshot.LogNow("startup");
         Log.Write($"Started. Profile: {(_profile == null ? "none" : $"{_profile.Monitors.Count} monitor(s) from {_profile.CapturedAt}")}, enforce={_settings.Enforce}");
 
-        if (_profile == null)
+        if (ScreenshotMode)
+        {
+            // nothing to learn or enforce
+        }
+        else if (_profile == null)
         {
             // First run: learn whatever the layout is right now and enforce it from here on.
             var learned = DisplayManager.CaptureForProfile();
@@ -271,6 +300,21 @@ public sealed class TrayApp : ApplicationContext
             ? "No layout has been persisted yet."
             : $"Saved {_profile.CapturedAt:g}{Environment.NewLine}{Environment.NewLine}{_profile}{Environment.NewLine}{Environment.NewLine}File: {DisplayProfile.ProfilePath}";
         MessageBox.Show(text, "Monitor Anchor - saved layout", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void ShowDiagnostics()
+    {
+        if (_diagnostics == null || _diagnostics.IsDisposed)
+        {
+            _diagnostics = new DiagnosticsForm(() => _profile);
+            _diagnostics.Show();
+        }
+        else
+        {
+            _diagnostics.Refresh();
+            if (_diagnostics.WindowState == FormWindowState.Minimized) _diagnostics.WindowState = FormWindowState.Normal;
+            _diagnostics.Activate();
+        }
     }
 
     private void ToggleEnforce()
@@ -620,7 +664,75 @@ public sealed class TrayApp : ApplicationContext
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
-    /// <summary>Draws a small monitor glyph so we do not need an icon resource.</summary>
+    /// <summary>Renders the tray menu (with the Fake monitors submenu open) and the diagnostics window to PNG files.</summary>
+    public void SaveScreenshots(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        RefreshMenu();
+
+        _menu.Show(new Point(200, 200));
+        Application.DoEvents();
+        var fake = _menu.Items.OfType<ToolStripMenuItem>().First(i => i.Text == "Fake monitors");
+        fake.ShowDropDown();
+        Application.DoEvents();
+        System.Threading.Thread.Sleep(200);
+        Application.DoEvents();
+
+        // Compose menu + open submenu into one image.
+        var mb = _menu.Bounds; var sb = fake.DropDown.Bounds;
+        var union = Rectangle.Union(mb, sb);
+        using (var bmp = new Bitmap(union.Width, union.Height))
+        {
+            using (var menuBmp = new Bitmap(mb.Width, mb.Height))
+            using (var subBmp = new Bitmap(sb.Width, sb.Height))
+            using (var g = Graphics.FromImage(bmp))
+            {
+                _menu.DrawToBitmap(menuBmp, new Rectangle(0, 0, mb.Width, mb.Height));
+                fake.DropDown.DrawToBitmap(subBmp, new Rectangle(0, 0, sb.Width, sb.Height));
+                g.Clear(Color.Transparent);
+                g.DrawImage(menuBmp, mb.X - union.X, mb.Y - union.Y);
+                g.DrawImage(subBmp, sb.X - union.X, sb.Y - union.Y);
+            }
+            bmp.Save(Path.Combine(dir, "menu.png"), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        fake.HideDropDown();
+        _menu.Close();
+
+        using var form = new DiagnosticsForm(() => _profile);
+        form.StartPosition = FormStartPosition.Manual;
+        form.Location = new Point(50, 50);
+        form.Show();
+        form.Refresh();
+        form.PerformLayout();
+        Application.DoEvents();
+        System.Threading.Thread.Sleep(200);
+        Application.DoEvents();
+        // Crop above the EDID section so monitor serial numbers stay out of the published image.
+        int height = Math.Min(form.ClientSize.Height, 430);
+        using (var bmp = new Bitmap(form.ClientSize.Width, height))
+        {
+            form.DrawToBitmap(bmp, new Rectangle(0, 0, form.ClientSize.Width, height));
+            bmp.Save(Path.Combine(dir, "diagnostics.png"), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        form.Close();
+    }
+
+    /// <summary>The app icon (assets/icon.ico, embedded at build time), falling back to a drawn glyph.</summary>
+    public static Icon AppIcon()
+    {
+        try
+        {
+            using var stream = typeof(TrayApp).Assembly.GetManifestResourceStream("MonitorAnchor.icon.ico");
+            if (stream != null) return new Icon(stream);
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Embedded icon failed to load: " + ex.Message);
+        }
+        return MakeIcon();
+    }
+
+    /// <summary>Draws a small monitor glyph, used only if the embedded icon is missing.</summary>
     private static Icon MakeIcon()
     {
         using var bmp = new Bitmap(32, 32);

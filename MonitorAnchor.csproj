@@ -10,6 +10,7 @@
     <AssemblyName>MonitorAnchor</AssemblyName>
     <RootNamespace>MonitorAnchor</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>assets\icon.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -17,8 +18,14 @@
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- tools/ holds stand-alone file-based scripts (dotnet run tools/x.cs); keep them out of the app build. -->
+    <Compile Remove="tools\**" />
+    <EmbeddedResource Include="assets\icon.ico" LogicalName="MonitorAnchor.icon.ico" />
+  </ItemGroup>
 
   <!-- Lets the updater pick the release asset that matches how this build was published. -->
   <PropertyGroup Condition="'$(SelfContained)' == 'true'">
