@@ -134,7 +134,7 @@ public sealed class TrayApp : ApplicationContext
 
         // Layout: title / actions / behaviours / views / app settings / exit.
         var menu = _menu = new ContextMenuStrip();
-        menu.Items.Add(new ToolStripMenuItem($"Monitor Anchor {Updater.Current}") { Enabled = false });
+        menu.Items.Add(new ToolStripMenuItem($"About Monitor Anchor {Updater.Current}...", null, (_, _) => ShowAbout()));
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_persistItem);
@@ -345,6 +345,21 @@ public sealed class TrayApp : ApplicationContext
             ? "No layout has been persisted yet."
             : $"Saved {_profile.CapturedAt:g}{Environment.NewLine}{Environment.NewLine}{_profile}{Environment.NewLine}{Environment.NewLine}File: {DisplayProfile.ProfilePath}";
         MessageBox.Show(text, "Monitor Anchor - saved layout", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private AboutForm? _about;
+
+    private void ShowAbout()
+    {
+        if (_about == null || _about.IsDisposed)
+        {
+            _about = new AboutForm();
+            _about.Show();
+        }
+        else
+        {
+            _about.Activate();
+        }
     }
 
     private void ShowDiagnostics()
@@ -847,6 +862,22 @@ public sealed class TrayApp : ApplicationContext
             bmp.Save(Path.Combine(dir, "diagnostics.png"), System.Drawing.Imaging.ImageFormat.Png);
         }
         form.Close();
+
+        using (var about = new AboutForm())
+        {
+            about.StartPosition = FormStartPosition.Manual;
+            about.Location = new Point(50, 50);
+            about.TopMost = true;
+            about.Show();
+            about.Activate();
+            Application.DoEvents();
+            System.Threading.Thread.Sleep(500);
+            Application.DoEvents();
+            using var bmp = new Bitmap(about.Width, about.Height - 10);
+            CaptureScreen(bmp, about.Location);
+            bmp.Save(Path.Combine(dir, "about.png"), System.Drawing.Imaging.ImageFormat.Png);
+            about.Close();
+        }
 
         // A representative sample rather than the real log, which lists the user's window titles.
         string sample = Path.Combine(Path.GetTempPath(), "MonitorAnchor-sample-log.txt");

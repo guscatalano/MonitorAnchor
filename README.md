@@ -212,3 +212,15 @@ dotnet publish -c Release -o publish-sc -p:SelfContained=true          # runtime
   file is parked as `.old`, the new one moved into place and started, and the parked file deleted on the next start.
 
 Not covered: DPI scaling, colour depth other than what was saved, and clone/duplicate topologies.
+
+## About
+
+Made by Gus Catalano. The tray menu's **About Monitor Anchor...** entry shows the version and these links.
+
+<p align="center">
+  <img src="assets/about.png" alt="About window">
+</p>
+
+- Blog: https://guscatalano.dev/
+- Source and releases: https://github.com/guscatalano/MonitorAnchor
+- Bugs and ideas: [open an issue](https://github.com/guscatalano/MonitorAnchor/issues)
