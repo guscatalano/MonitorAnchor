@@ -37,6 +37,8 @@ public sealed class LogForm : Form
 
         var bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(6) };
         _follow = new CheckBox { Text = "Auto-scroll", Checked = true, AutoSize = true, Margin = new Padding(6, 8, 12, 0) };
+        var onTop = new CheckBox { Text = "Always on top", AutoSize = true, Margin = new Padding(0, 8, 12, 0) };
+        onTop.CheckedChanged += (_, _) => TopMost = onTop.Checked;
         var reload = new Button { Text = "Reload", AutoSize = true };
         var copy = new Button { Text = "Copy all", AutoSize = true };
         var editor = new Button { Text = "Open in editor", AutoSize = true };
@@ -51,7 +53,7 @@ public sealed class LogForm : Form
             Log.Write("Log cleared from the viewer");
             Reload();
         };
-        bar.Controls.AddRange(new Control[] { _follow, reload, copy, editor, clear });
+        bar.Controls.AddRange(new Control[] { _follow, onTop, reload, copy, editor, clear });
 
         Controls.Add(_text);
         Controls.Add(bar);

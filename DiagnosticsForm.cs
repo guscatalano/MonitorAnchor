@@ -7,10 +7,12 @@ public sealed class DiagnosticsForm : Form
 {
     private readonly TextBox _text;
     private readonly Func<DisplayProfile?> _profile;
+    private readonly Func<string>? _kvmVerdict;
 
-    public DiagnosticsForm(Func<DisplayProfile?> profile)
+    public DiagnosticsForm(Func<DisplayProfile?> profile, Func<string>? kvmVerdict = null)
     {
         _profile = profile;
+        _kvmVerdict = kvmVerdict;
         Text = "Monitor Anchor diagnostics";
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(1000, 700);
@@ -49,7 +51,7 @@ public sealed class DiagnosticsForm : Form
     {
         try
         {
-            _text.Text = Diagnostics.WriteDump(_profile());
+            _text.Text = Diagnostics.WriteDump(_profile(), _kvmVerdict);
         }
         catch (Exception ex)
         {

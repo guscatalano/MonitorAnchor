@@ -13,6 +13,9 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _applyItem;
     private readonly ToolStripMenuItem _showItem;
     private readonly ContextMenuStrip _menu;
+    private readonly AppState _state;
+    private readonly KvmDetector _kvm;
+    private readonly DeviceWatcher _devices;
 
     /// <summary>Set by --screenshots: build the UI without registering startup, learning a layout or enforcing anything.</summary>
     public static bool ScreenshotMode;
@@ -57,6 +60,10 @@ public sealed class TrayApp : ApplicationContext
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settings = AppSettings.Load();
         _profile = DisplayProfile.Load();
+        _state = AppState.Load();
+        _kvm = new KvmDetector(_state);
+        _devices = new DeviceWatcher();
+        _devices.DeviceChanged += _kvm.OnDevice;
 
         _persistItem = new ToolStripMenuItem("Persist current layout", null, (_, _) => Persist())
         {
@@ -306,7 +313,7 @@ public sealed class TrayApp : ApplicationContext
     {
         if (_diagnostics == null || _diagnostics.IsDisposed)
         {
-            _diagnostics = new DiagnosticsForm(() => _profile);
+            _diagnostics = new DiagnosticsForm(() => _profile, _kvm.Verdict);
             _diagnostics.Show();
         }
         else
@@ -499,6 +506,7 @@ public sealed class TrayApp : ApplicationContext
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
+        _kvm.OnDisplayChange();
         // Capture what Windows just did to the windows, before we touch anything.
         WindowSnapshot.LogNow("right after display change");
         ScheduleApply("display settings changed");
@@ -657,6 +665,8 @@ public sealed class TrayApp : ApplicationContext
         _lateSnapshot.Dispose();
         _updateTimer.Dispose();
         _jiggler.Dispose();
+        _devices.Dispose();
+        _kvm.Dispose();
         _standIns.Dispose(); // retires any fake monitors
         Native.SetThreadExecutionState(Native.ES_CONTINUOUS); // release the keep-awake hold
         _tray.Visible = false;
@@ -735,7 +745,7 @@ public sealed class TrayApp : ApplicationContext
         fake.HideDropDown();
         _menu.Close();
 
-        using var form = new DiagnosticsForm(() => _profile);
+        using var form = new DiagnosticsForm(() => _profile, _kvm.Verdict);
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(50, 50);
         form.TopMost = true; // we are not the foreground app, so force the window above whatever is there

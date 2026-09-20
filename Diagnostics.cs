@@ -7,7 +7,7 @@ public static class Diagnostics
 {
     public static string DumpPath => Path.Combine(DisplayProfile.ConfigDir, "dump.txt");
 
-    public static string Build(DisplayProfile? saved)
+    public static string Build(DisplayProfile? saved, Func<string>? kvmVerdict = null)
     {
         var text = new StringBuilder();
         text.AppendLine($"Monitor Anchor {Updater.Current} ({Updater.AssetName})  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -40,11 +40,25 @@ public static class Diagnostics
         text.AppendLine();
 
         text.AppendLine("EDID (as cached by Windows; a KVM with EDID emulation shows its own values here)");
+        var edids = new List<Edid.Info>();
         foreach (var t in connected)
         {
             var info = Edid.ForMonitor(t.MonitorId);
+            if (info != null) edids.Add(info);
             text.AppendLine($"  {t.FriendlyName,-20} {(info == null ? "not available" : Edid.Describe(info))}");
         }
+        bool duplicateEdid = edids.GroupBy(e => (e.Manufacturer, e.ProductCode, e.Serial, e.SerialText)).Any(g => g.Count() > 1);
+        text.AppendLine(duplicateEdid
+            ? "  note: two monitors report identical EDIDs, which suggests a KVM or splitter emulating EDID"
+            : "  monitors report distinct EDIDs: pass-through (no EDID emulation detected)");
+        text.AppendLine();
+
+        text.AppendLine("KVM / DOCK");
+        string verdict;
+        try { verdict = kvmVerdict?.Invoke() ?? new KvmDetector(AppState.Load()).Verdict(); }
+        catch (Exception ex) { verdict = "unavailable: " + ex.Message; }
+        text.AppendLine("  " + verdict);
+        text.AppendLine("  (inferred: a KVM takes monitors and USB input devices away together; a dock also takes hubs, network and storage)");
         text.AppendLine();
 
         text.AppendLine("VIRTUAL DISPLAY DRIVER");
@@ -60,9 +74,9 @@ public static class Diagnostics
     }
 
     /// <summary>Writes the report to dump.txt and returns it.</summary>
-    public static string WriteDump(DisplayProfile? saved)
+    public static string WriteDump(DisplayProfile? saved, Func<string>? kvmVerdict = null)
     {
-        string report = Build(saved);
+        string report = Build(saved, kvmVerdict);
         Directory.CreateDirectory(DisplayProfile.ConfigDir);
         File.WriteAllText(DumpPath, report);
         return report;

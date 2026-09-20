@@ -97,7 +97,7 @@ that reconnects. Monitor Anchor keeps the monitor identities and layout stable s
 | --- | --- |
 | Show saved layout... | What is saved and where the file lives. |
 | Show diagnostics... | Everything the app can see, in one window (below). |
-| Show log... | Live log viewer: tails the file and auto-scrolls as entries arrive. Scroll up to pause following, Ctrl+End to resume. Buttons to reload, copy, open in your editor, or clear the file. |
+| Show log... | Live log viewer: tails the file and auto-scrolls as entries arrive. Scroll up to pause following, Ctrl+End to resume. Always-on-top checkbox, plus buttons to reload, copy, open in your editor, or clear the file. |
 
 **App**
 
@@ -117,6 +117,15 @@ Refresh, copy to clipboard, or jump to the data folder or log from there.
 <p align="center">
   <img src="assets/diagnostics.png" alt="Diagnostics window">
 </p>
+
+### KVM detection
+
+Nothing on a PC says "there is a KVM", but a KVM has a signature: every monitor behind it and the USB keyboard
+and mouse disappear in the same instant, and come back together. Monitor Anchor listens for device changes,
+pairs monitor disconnects with input-device disconnects inside a three-second window, and logs the result as
+**KVM switch away** / **KVM switch back** instead of a generic display change. A burst that also takes hubs,
+network or storage with it is logged as **Undocked** / **Docked** instead. Counts are kept across restarts and
+summarised in diagnostics, along with whether the monitors' EDIDs look real or emulated.
 
 ### Log viewer
 
