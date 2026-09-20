@@ -105,7 +105,7 @@ public sealed class TrayApp : ApplicationContext
 
         menu.Items.Add(_showItem);
         menu.Items.Add(_diagnosticsItem);
-        menu.Items.Add(new ToolStripMenuItem("Open log", null, (_, _) => OpenLog()));
+        menu.Items.Add(new ToolStripMenuItem("Show log...", null, (_, _) => OpenLog()));
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_startupItem);
@@ -453,17 +453,20 @@ public sealed class TrayApp : ApplicationContext
         RefreshMenu();
     }
 
-    private static void OpenLog()
+    private LogForm? _logForm;
+
+    /// <summary>Opens the live log viewer (tails the file, auto-scrolls); one window, re-activated if already open.</summary>
+    private void OpenLog()
     {
-        try
+        if (_logForm == null || _logForm.IsDisposed)
         {
-            Directory.CreateDirectory(DisplayProfile.ConfigDir);
-            if (!File.Exists(Log.Path)) File.WriteAllText(Log.Path, string.Empty);
-            Process.Start(new ProcessStartInfo(Log.Path) { UseShellExecute = true });
+            _logForm = new LogForm();
+            _logForm.Show();
         }
-        catch (Exception ex)
+        else
         {
-            Log.Write("Open log failed: " + ex.Message);
+            if (_logForm.WindowState == FormWindowState.Minimized) _logForm.WindowState = FormWindowState.Normal;
+            _logForm.Activate();
         }
     }
 
@@ -664,6 +667,40 @@ public sealed class TrayApp : ApplicationContext
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 
+    private static string SampleLog()
+    {
+        var t = DateTime.Now.AddMinutes(-3);
+        string S(int s) => t.AddSeconds(s).ToString("yyyy-MM-dd HH:mm:ss");
+        return string.Join(Environment.NewLine, new[]
+        {
+            $"{S(0)} Started. Profile: 2 monitor(s) from {t.AddDays(-4):MM/dd/yyyy HH:mm:ss}, enforce=True",
+            $"{S(0)} Display change detected (startup); checking in 1500 ms",
+            $"{S(2)} Apply (auto): Layout already matches the saved profile.",
+            $"{S(41)} Display change detected (display settings changed); checking in 1500 ms",
+            $"{S(43)} No saved settings for Generic PnP Monitor [\\\\.\\DISPLAY1] 2880x1920 @ 120Hz, pos (0,0), rot 0°, primary",
+            $"{S(43)} Apply (auto): Layout already matches the saved profile.",
+            $"{S(48)} Display change detected (display settings changed); checking in 1500 ms",
+            $"{S(50)} SetDisplayConfig(apply supplied, 2 path(s), flags 0x2010): success",
+            $"{S(50)} Re-enabling VG259QM: success (targeted)",
+            $"{S(50)} Generic PnP Monitor (\\\\.\\DISPLAY10): 1920x1080@60 -> 1920x1080@120 pos(0,-1080) : success",
+            $"{S(50)} Commit: success",
+            $"{S(50)} Apply (auto): 2 change(s) applied, 0 failed.",
+            "Re-enabling VG259QM: success (targeted)",
+            "Generic PnP Monitor (\\\\.\\DISPLAY10): 1920x1080@60 -> 1920x1080@120 pos(0,-1080) : success",
+            $"{S(51)} Display change detected (display settings changed); checking in 1500 ms",
+            $"{S(52)} Apply (auto): Layout already matches the saved profile.",
+            $"{S(80)} Update check: {Updater.Current} is current (latest {Updater.Current})",
+            "",
+        });
+    }
+
+    /// <summary>Copies what is actually on screen at <paramref name="origin"/> (the window must be shown and on top).</summary>
+    private static void CaptureScreen(Bitmap target, Point origin)
+    {
+        using var g = Graphics.FromImage(target);
+        g.CopyFromScreen(origin, Point.Empty, target.Size);
+    }
+
     /// <summary>Renders the tray menu (with the Fake monitors submenu open) and the diagnostics window to PNG files.</summary>
     public void SaveScreenshots(string dir)
     {
@@ -701,20 +738,43 @@ public sealed class TrayApp : ApplicationContext
         using var form = new DiagnosticsForm(() => _profile);
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(50, 50);
+        form.TopMost = true; // we are not the foreground app, so force the window above whatever is there
         form.Show();
+        form.Activate();
         form.Refresh();
         form.PerformLayout();
         Application.DoEvents();
-        System.Threading.Thread.Sleep(200);
+        System.Threading.Thread.Sleep(600);
         Application.DoEvents();
         // Crop above the EDID section so monitor serial numbers stay out of the published image.
-        int height = Math.Min(form.ClientSize.Height, 430);
-        using (var bmp = new Bitmap(form.ClientSize.Width, height))
+        int height = Math.Min(form.Height, 436);
+        using (var bmp = new Bitmap(form.Width, height))
         {
-            form.DrawToBitmap(bmp, new Rectangle(0, 0, form.ClientSize.Width, height));
+            CaptureScreen(bmp, form.Location);
             bmp.Save(Path.Combine(dir, "diagnostics.png"), System.Drawing.Imaging.ImageFormat.Png);
         }
         form.Close();
+
+        // A representative sample rather than the real log, which lists the user's window titles.
+        string sample = Path.Combine(Path.GetTempPath(), "MonitorAnchor-sample-log.txt");
+        File.WriteAllText(sample, SampleLog());
+        using var logForm = new LogForm(sample);
+        logForm.StartPosition = FormStartPosition.Manual;
+        logForm.Location = new Point(50, 50);
+        logForm.Size = new Size(1000, 420);
+        logForm.TopMost = true;
+        logForm.Show();
+        logForm.Activate();
+        logForm.PerformLayout();
+        Application.DoEvents();
+        System.Threading.Thread.Sleep(700); // let the tail timer tick once
+        Application.DoEvents();
+        using (var bmp = new Bitmap(logForm.Width, logForm.Height - 10)) // the DWM frame reports a little taller than it paints
+        {
+            CaptureScreen(bmp, logForm.Location);
+            bmp.Save(Path.Combine(dir, "log.png"), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        logForm.Close();
     }
 
     /// <summary>The app icon (assets/icon.ico, embedded at build time), falling back to a drawn glyph.</summary>

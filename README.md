@@ -97,7 +97,7 @@ that reconnects. Monitor Anchor keeps the monitor identities and layout stable s
 | --- | --- |
 | Show saved layout... | What is saved and where the file lives. |
 | Show diagnostics... | Everything the app can see, in one window (below). |
-| Open log | Opens the activity log in your text editor. |
+| Show log... | Live log viewer: tails the file and auto-scrolls as entries arrive. Scroll up to pause following, Ctrl+End to resume. Buttons to reload, copy, open in your editor, or clear the file. |
 
 **App**
 
@@ -118,6 +118,14 @@ Refresh, copy to clipboard, or jump to the data folder or log from there.
   <img src="assets/diagnostics.png" alt="Diagnostics window">
 </p>
 
+### Log viewer
+
+Tails the log as the app works, so you can watch a plug, unplug or KVM switch being handled in real time.
+
+<p align="center">
+  <img src="assets/log.png" alt="Log viewer">
+</p>
+
 ## Command line
 
 All of these run without a tray icon and exit immediately.
@@ -131,6 +139,7 @@ All of these run without a tray icon and exit immediately.
 | `--test-enable` | Check, without changing anything, whether disabled-but-connected monitors could be re-enabled in a targeted way. |
 
 Data folder: `%LOCALAPPDATA%\MonitorAnchor\` (`profile.json`, `settings.json`, `log.txt`, `dump.txt`).
+The log keeps at most two days of entries (trimmed at startup and hourly) and never grows past 2 MB.
 
 ## Fake monitors
 

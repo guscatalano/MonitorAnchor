@@ -33,7 +33,7 @@ public sealed class DiagnosticsForm : Form
         var refresh = new Button { Text = "Refresh", AutoSize = true };
         var copy = new Button { Text = "Copy to clipboard", AutoSize = true };
         var folder = new Button { Text = "Open data folder", AutoSize = true };
-        var log = new Button { Text = "Open log", AutoSize = true };
+        var log = new Button { Text = "Open log file", AutoSize = true };
         refresh.Click += (_, _) => Refresh();
         copy.Click += (_, _) => { try { Clipboard.SetText(_text.Text); } catch { /* clipboard busy */ } };
         folder.Click += (_, _) => Open(DisplayProfile.ConfigDir);

@@ -14,6 +14,7 @@ internal static class Program
             try { Process.GetProcessById(pid).WaitForExit(15_000); } catch { /* already gone */ }
         }
         Updater.CleanupOld();
+        Log.Trim();
 
         // Diagnostic mode: write the current layout to a file and exit. Handy for bug reports.
         if (args.Any(a => string.Equals(a, "--dump", StringComparison.OrdinalIgnoreCase)))
