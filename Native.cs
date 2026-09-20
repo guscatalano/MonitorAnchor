@@ -172,9 +172,28 @@ internal static class Native
         public DISPLAYCONFIG_PATH_SOURCE_INFO sourceInfo; public DISPLAYCONFIG_PATH_TARGET_INFO targetInfo; public uint flags;
     }
 
-    /// <summary>Only the header fields are declared; the 48-byte mode union is padding we never read.</summary>
-    [StructLayout(LayoutKind.Sequential, Size = 64)]
-    public struct DISPLAYCONFIG_MODE_INFO { public uint infoType; public uint id; public LUID adapterId; }
+    public const uint DISPLAYCONFIG_MODE_INFO_TYPE_TARGET = 2;
+
+    /// <summary>
+    /// Header plus the target-mode view of the union (DISPLAYCONFIG_TARGET_MODE / VIDEO_SIGNAL_INFO), which is
+    /// what we read when infoType is TARGET. For source modes the union means something else and is ignored.
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit, Size = 64)]
+    public struct DISPLAYCONFIG_MODE_INFO
+    {
+        [FieldOffset(0)] public uint infoType;
+        [FieldOffset(4)] public uint id;
+        [FieldOffset(8)] public LUID adapterId;
+        [FieldOffset(16)] public ulong pixelRate;
+        [FieldOffset(24)] public DISPLAYCONFIG_RATIONAL hSyncFreq;
+        [FieldOffset(32)] public DISPLAYCONFIG_RATIONAL vSyncFreq;
+        [FieldOffset(40)] public uint activeCx;
+        [FieldOffset(44)] public uint activeCy;
+        [FieldOffset(48)] public uint totalCx;
+        [FieldOffset(52)] public uint totalCy;
+        [FieldOffset(56)] public uint videoStandard;
+        [FieldOffset(60)] public uint scanLineOrdering;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct DISPLAYCONFIG_DEVICE_INFO_HEADER { public uint type; public uint size; public LUID adapterId; public uint id; }

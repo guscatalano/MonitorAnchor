@@ -255,6 +255,7 @@ public sealed class TrayApp : ApplicationContext
         RefreshMenu();
         ApplyKeepAwake();
         WindowSnapshot.LogNow("startup");
+        Log.Write("System:" + Environment.NewLine + SystemInfo.Describe());
         OfferInstall();
         Log.Write($"Started. {_store.Layouts.Count} saved layout(s); active: {(_profile == null ? "none matches the connected monitors" : $"\"{_profile.Name}\" ({_profile.Monitors.Count} monitor(s), captured {_profile.CapturedAt:g})")}; enforce={_settings.Enforce}");
 

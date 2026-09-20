@@ -19,6 +19,10 @@ public static class Diagnostics
         text.AppendLine($"Running from: {Environment.ProcessPath}{(Packaged.IsPackaged ? "  (MSIX package)" : Installer.IsInstalled ? "  (installed)" : "")}");
         text.AppendLine();
 
+        text.AppendLine("SYSTEM");
+        text.AppendLine(SystemInfo.Describe());
+        text.AppendLine();
+
         text.AppendLine($"SAVED LAYOUTS ({store.Layouts.Count})");
         if (store.Layouts.Count == 0) text.AppendLine("  (none)");
         foreach (var l in store.Layouts)

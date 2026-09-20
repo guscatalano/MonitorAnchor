@@ -147,7 +147,10 @@ summarised in diagnostics, along with whether the monitors' EDIDs look real or e
 Besides every layout decision, the log records the context you need to read it later: whether someone was at the
 keyboard ("Presence: away", "back after 5 h 10 min", a heartbeat every half hour), when Windows turned the
 displays off or on, session lock and unlock, every USB device arrival and removal, KVM switches and dock events,
-and window positions around each display change.
+display link retrains (a burst of display-change events with the same monitors, typically with the GPU's HDMI
+audio endpoint bouncing alongside: the signature of a flickering link), and window positions around each display
+change. At startup it also records the machine: CPU, RAM, Windows build, uptime, power-plan timeouts, GPUs with
+driver versions, and each monitor's connector, colour format, bit depth, exact refresh timing and pixel clock.
 
 ### Log viewer
 

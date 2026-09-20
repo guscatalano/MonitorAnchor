@@ -3,6 +3,19 @@
 All notable changes to Monitor Anchor. The release workflow uses the section for the tagged version as the
 release notes, so keep the heading format `## X.Y.Z - YYYY-MM-DD`.
 
+## 2.4.0 - 2026-09-20
+
+**New**
+- **Display link retrain detection.** Several display-change events with the same monitors in a short burst,
+  or one together with the GPU's HDMI audio endpoint bouncing, are logged as "Display link retrained N time(s)"
+  with the link details at that moment, counted across restarts and shown in diagnostics. This is what a
+  flickering or blanking HDMI/DisplayPort link looks like from Windows.
+- **System and link facts** at startup and in diagnostics: machine name, CPU, RAM, Windows build, uptime,
+  power-plan display-off and sleep timeouts, every GPU with driver version and date, and per monitor the
+  connector type, colour format, bits per channel, exact refresh timing (119.880 vs 120.000) and pixel clock.
+  Two machines' dumps can now be compared line by line.
+- GPU audio endpoint churn no longer counts toward the dock threshold in KVM detection.
+
 ## 2.3.0 - 2026-09-20
 
 **New**

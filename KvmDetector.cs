@@ -10,6 +10,9 @@ public sealed class AppState
     public int DockEvents { get; set; }
     /// <summary>How many of the KVM switches took only the USB side while the monitors stayed connected.</summary>
     public int KvmUsbOnly { get; set; }
+    /// <summary>Display-change events with unchanged monitors that came in bursts: the link dropped and retrained.</summary>
+    public int LinkRetrains { get; set; }
+    public DateTime? LastLinkRetrain { get; set; }
     public DateTime? LastKvmSwitch { get; set; }
     public DateTime? LastDockEvent { get; set; }
 
@@ -79,7 +82,13 @@ public sealed class KvmDetector : IDisposable
         for (int i = 0; i < removed; i++) _events.Add((at, "monitor-", "m" + (++_monitorSeq)));
         for (int i = 0; i < added; i++) _events.Add((at, "monitor+", "m" + (++_monitorSeq)));
         Log.Write($"Monitor topology: {now.Count} connected ({removed} removed, {added} added)");
-        if (removed + added > 0) Restart();
+        if (removed + added == 0)
+        {
+            // A display-change event with the same monitors is Windows re-reporting a mode: either something set a
+            // mode on purpose, or the link dropped and came back (retrained). Several in a row mean the latter.
+            _events.Add((at, "retrain", "r" + (++_monitorSeq)));
+        }
+        Restart();
     }
 
     /// <summary>Call for every device interface arrival/removal (from <see cref="DeviceWatcher"/>).</summary>
@@ -87,13 +96,23 @@ public sealed class KvmDetector : IDisposable
     {
         if (path.Contains("#DISPLAY#", StringComparison.OrdinalIgnoreCase) || path.StartsWith(@"\\?\DISPLAY#", StringComparison.OrdinalIgnoreCase))
             return; // monitors are counted through the topology diff
-        bool hid = path.StartsWith(@"\\?\HID#", StringComparison.OrdinalIgnoreCase);
-        _events.Add((DateTime.Now, (hid ? "hid" : "other") + (arrived ? "+" : "-"), path.ToUpperInvariant()));
-        Log.Write($"Device {(arrived ? "arrived" : "removed")}: {(hid ? "input" : "other")} {Shorten(path)}");
+        string kind = Classify(path);
+        _events.Add((DateTime.Now, kind + (arrived ? "+" : "-"), path.ToUpperInvariant()));
+        Log.Write($"Device {(arrived ? "arrived" : "removed")}: {kind} {Shorten(path)}");
         Restart();
     }
 
     private void Restart() { _settle.Stop(); _settle.Start(); }
+
+    /// <summary>hid = keyboard/mouse; audio = the GPU's HDMI/DP audio function and audio endpoints, which ride along with the display link; other = everything else.</summary>
+    internal static string Classify(string path)
+    {
+        if (path.StartsWith(@"\\?\HID#", StringComparison.OrdinalIgnoreCase)) return "hid";
+        if (path.Contains("MMDEVAPI#", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("HDAUDIO#", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("FUNC_01&VEN_", StringComparison.OrdinalIgnoreCase)) return "audio";
+        return "other";
+    }
 
     // Test hooks: feed events without real hardware and evaluate immediately.
     internal void FeedMonitors(int removed, int added, DateTime? at = null)
@@ -104,8 +123,11 @@ public sealed class KvmDetector : IDisposable
     }
     internal void FeedDevice(bool arrived, string path, DateTime? at = null)
     {
-        bool hid = path.StartsWith(@"\\?\HID#", StringComparison.OrdinalIgnoreCase);
-        _events.Add((at ?? DateTime.Now, (hid ? "hid" : "other") + (arrived ? "+" : "-"), path.ToUpperInvariant()));
+        _events.Add((at ?? DateTime.Now, Classify(path) + (arrived ? "+" : "-"), path.ToUpperInvariant()));
+    }
+    internal void FeedRetrain(int count, DateTime? at = null)
+    {
+        for (int i = 0; i < count; i++) _events.Add((at ?? DateTime.Now, "retrain", "r" + (++_monitorSeq)));
     }
     internal string? LastKind { get; private set; }
 
@@ -126,8 +148,21 @@ public sealed class KvmDetector : IDisposable
         int monOff = Count("monitor-"), monOn = Count("monitor+");
         int hidOff = Count("hid-"), hidOn = Count("hid+");
         int otherOff = Count("other-"), otherOn = Count("other+");
+        int retrains = Count("retrain");
+        int audioChurn = _events.Count(e => e.Kind is "audio-" or "audio+");
         double span = (_events.Max(e => e.At) - _events.Min(e => e.At)).TotalSeconds;
         _events.Clear();
+
+        // Link retraining: the same monitors re-reported, more than once or together with the GPU audio endpoint
+        // bouncing. One lone event is just a mode set (ours or somebody's) and is not reported.
+        if (retrains >= 2 || (retrains >= 1 && audioChurn > 0))
+        {
+            _state.LinkRetrains += retrains; _state.LastLinkRetrain = DateTime.Now; _state.Save();
+            string links = string.Join("; ", LinkInfo.Query().Select(l => l.ToString()));
+            Raise("Display link retrained", $"{retrains} display-change event(s) with the same monitors within {span:F1} s" +
+                  (audioChurn > 0 ? $", GPU audio endpoint churned {audioChurn} time(s)" : "") +
+                  $" (total {_state.LinkRetrains}). Link now: {links}");
+        }
 
         // A dock takes a whole tree of devices with it; a KVM takes only displays and input.
         const int DockThreshold = 4;
@@ -198,9 +233,14 @@ public sealed class KvmDetector : IDisposable
     public string Verdict()
     {
         int switches = _state.KvmSwitchesAway + _state.KvmSwitchesBack;
-        if (switches == 0 && _state.DockEvents == 0)
-            return "no KVM pattern seen yet (monitors and input devices have never disconnected together while the app was running)";
         var parts = new List<string>();
+        if (_state.LinkRetrains > 0)
+            parts.Add($"display link retrained {_state.LinkRetrains} time(s), last {_state.LastLinkRetrain:g}");
+        if (switches == 0 && _state.DockEvents == 0)
+        {
+            parts.Add("no KVM pattern seen yet (monitors and input devices have never disconnected together while the app was running)");
+            return string.Join("; ", parts);
+        }
         if (switches > 0)
             parts.Add($"KVM suspected: {_state.KvmSwitchesAway} switch(es) away, {_state.KvmSwitchesBack} back, last {_state.LastKvmSwitch:g}" +
                       (_state.KvmUsbOnly > 0 ? $" ({_state.KvmUsbOnly} switched USB only; the KVM keeps video connected)" : ""));
