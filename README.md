@@ -94,6 +94,7 @@ that reconnects. Monitor Anchor keeps the monitor identities and layout stable s
 | Item | What it does |
 | --- | --- |
 | Enforce layout on display changes | Automatic restore. Off = the app just sits there. On by default. |
+| When a monitor returns, move windows back | Every 20 s while the layout is intact, remembers where each window sits. After a monitor comes back and the layout is restored, windows that Windows moved to another screen are put back, maximised state included. Windows 11 does much of this itself; this covers what it misses. Off by default. |
 | Keep displays awake | Hold the display and system idle timers so the screens never turn off. On by default. |
 | When idle ▸ mouse | One of three: **Leave the mouse alone** (default), **Nudge the mouse in place** (one pixel and back every half minute, so the local session and presence indicators see activity), or **Hover over every window** (the cursor visits each visible window in turn, hovers and nudges without changing focus, so anything that watches for mouse movement such as VNC, Citrix, browser-based sessions or chat presence sees activity; fully covered windows are skipped; the cursor goes back where it was). Hovering includes the nudge, so they are alternatives, not additive. |
 | When idle ▸ Also poke Remote Desktop sessions | Independent of the mouse choice. Every open Remote Desktop window (mstsc, the Windows App, or hosts like mRemoteNG that embed the Remote Desktop control), full-screen or windowed, is brought to the front in turn, the cursor is parked over it and nudged, and F15 (a key no application uses) is pressed, so each remote session sees input and never idles or locks. The window you had in front and the cursor position are restored afterwards. Minimised sessions cannot receive input and are skipped. Off by default. |
@@ -201,11 +202,14 @@ dotnet publish -c Release -o publish-sc -p:SelfContained=true          # runtime
 `tools/make-icon.cs` regenerates `assets/icon.ico`, `icon.png` and the MSIX tile images (run it from inside
 `tools/`), and `MonitorAnchor.exe --screenshots assets` re-renders the README screenshots.
 
+Unit tests for the pure logic (layout selection, KVM classification, EDID parsing, log trimming, scale maths) live in
+`tests/MonitorAnchor.Tests`; `dotnet test tests/MonitorAnchor.Tests` runs them, as does the pipeline on every push.
+
 ### Releasing
 
 Push a tag `vX.Y.Z` and the workflow does the rest: it builds with that version, packs and signs the MSIX using the
 `MSIX_CERT_PFX_BASE64` / `MSIX_CERT_PASSWORD` repository secrets, writes winget manifests and checksums, and creates
-the GitHub release with the tag's message as notes. Running apps pick the release up through their own update check.
+the GitHub release with that version's `CHANGELOG.md` section as notes (falling back to the tag message). Running apps pick the release up through their own update check.
 The MSIX `Publisher` in `msix/AppxManifest.xml` must match the certificate subject (`CN=Gus Catalano`).
 
 ## How it works, in detail

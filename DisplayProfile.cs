@@ -58,8 +58,11 @@ public sealed class DisplayProfile
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
+    /// <summary>Tests point this at a temporary folder so nothing touches the real data folder.</summary>
+    public static string? ConfigDirOverride;
+
     public static string ConfigDir =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MonitorAnchor");
+        ConfigDirOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MonitorAnchor");
 
     public static string ProfilePath => Path.Combine(ConfigDir, "profile.json");
 

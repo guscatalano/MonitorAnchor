@@ -95,6 +95,20 @@ public sealed class KvmDetector : IDisposable
 
     private void Restart() { _settle.Stop(); _settle.Start(); }
 
+    // Test hooks: feed events without real hardware and evaluate immediately.
+    internal void FeedMonitors(int removed, int added, DateTime? at = null)
+    {
+        var t = at ?? DateTime.Now;
+        for (int i = 0; i < removed; i++) _events.Add((t, "monitor-", "m" + (++_monitorSeq)));
+        for (int i = 0; i < added; i++) _events.Add((t, "monitor+", "m" + (++_monitorSeq)));
+    }
+    internal void FeedDevice(bool arrived, string path, DateTime? at = null)
+    {
+        bool hid = path.StartsWith(@"\\?\HID#", StringComparison.OrdinalIgnoreCase);
+        _events.Add((at ?? DateTime.Now, (hid ? "hid" : "other") + (arrived ? "+" : "-"), path.ToUpperInvariant()));
+    }
+    internal string? LastKind { get; private set; }
+
     /// <summary>\\?\HID#VID_046D&amp;PID_C52B&amp;MI_00#7&amp;1a2b3c4d&amp;0&amp;0000#{guid} → HID#VID_046D&amp;PID_C52B&amp;MI_00</summary>
     private static string Shorten(string path)
     {
@@ -102,7 +116,7 @@ public sealed class KvmDetector : IDisposable
         return parts.Length >= 3 ? parts[1] + "#" + parts[2] : path;
     }
 
-    private void Evaluate()
+    internal void Evaluate()
     {
         var cutoff = DateTime.Now - Window - TimeSpan.FromMilliseconds(_settle.Interval);
         _events.RemoveAll(e => e.At < cutoff);
@@ -175,6 +189,7 @@ public sealed class KvmDetector : IDisposable
     private void Raise(string kind, string detail)
     {
         _lastRaised = DateTime.Now;
+        LastKind = kind;
         Log.Write($"{kind}: {detail}");
         try { Detected?.Invoke(kind, detail); } catch { /* ignore */ }
     }

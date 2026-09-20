@@ -24,6 +24,12 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _enforceItem;
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _keepAwakeItem;
+    private readonly ToolStripMenuItem _restoreWindowsItem;
+    private readonly WindowMemory _memory = new();
+    private readonly System.Windows.Forms.Timer _memoryTimer;
+    private HashSet<string> _lastActiveMonitorIds = new(StringComparer.OrdinalIgnoreCase);
+    private bool _restorePending;
+    private DateTime _lastDisplayChange = DateTime.MinValue;
     private readonly ToolStripMenuItem _standInItem;
     private readonly ToolStripMenuItem _installDriverItem;
     private readonly StandInManager _standIns = new();
@@ -75,6 +81,7 @@ public sealed class TrayApp : ApplicationContext
         _kvm = new KvmDetector(_state);
         _devices = new DeviceWatcher();
         _devices.DeviceChanged += _kvm.OnDevice;
+        Diagnostics.LiveStatus = () => (_settings.RestoreWindows ? "on: " : "off: ") + _memory.Status;
 
         _persistItem = new ToolStripMenuItem("Persist current layout", null, (_, _) => Persist())
         {
@@ -86,6 +93,7 @@ public sealed class TrayApp : ApplicationContext
         _enforceItem = new ToolStripMenuItem("Enforce layout on display changes", null, (_, _) => ToggleEnforce()) { CheckOnClick = false };
         _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup()) { CheckOnClick = false };
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
+        _restoreWindowsItem = new ToolStripMenuItem("When a monitor returns, move windows back", null, (_, _) => ToggleRestoreWindows()) { CheckOnClick = false };
         // Everything that happens while you are idle lives in one submenu. The mouse choice is one-of-three
         // (hovering over every window already includes a nudge); poking Remote Desktop is separate because it
         // also takes focus and presses a key.
@@ -149,6 +157,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_enforceItem);
+        menu.Items.Add(_restoreWindowsItem);
         menu.Items.Add(_keepAwakeItem);
         menu.Items.Add(idleMenu);
         menu.Items.Add(fakeMenu);
@@ -189,9 +198,30 @@ public sealed class TrayApp : ApplicationContext
         };
         if (!ScreenshotMode) _updateTimer.Start();
 
-        // Windows' own "remember window locations" restore can land a few seconds after a reconnect.
+        // Windows' own "remember window locations" restore can land a few seconds after a reconnect; ours runs after it.
         _lateSnapshot = new System.Windows.Forms.Timer { Interval = 5000 };
-        _lateSnapshot.Tick += (_, _) => { _lateSnapshot.Stop(); WindowSnapshot.LogNow("5 s after apply"); };
+        _lateSnapshot.Tick += (_, _) =>
+        {
+            _lateSnapshot.Stop();
+            WindowSnapshot.LogNow("5 s after apply");
+            if (_restorePending && _settings.RestoreWindows)
+            {
+                var moved = _memory.Restore();
+                Log.Write(moved.Count == 0 ? "Window memory: nothing to move back" : $"Window memory: moved {moved.Count} window(s) back:" + string.Concat(moved.Select(l => Environment.NewLine + "    " + l)));
+                if (moved.Count > 0) _tray.ShowBalloonTip(3000, "Windows restored", $"{moved.Count} window(s) moved back to their monitor.", ToolTipIcon.Info);
+            }
+            _restorePending = false;
+        };
+
+        // Remember window placements every 20 s while the layout is intact and has been quiet for a while.
+        _memoryTimer = new System.Windows.Forms.Timer { Interval = 20_000 };
+        _memoryTimer.Tick += (_, _) =>
+        {
+            if (!_settings.RestoreWindows || _profile == null || _restorePending) return;
+            if (DateTime.Now - _lastDisplayChange < TimeSpan.FromSeconds(30)) return;
+            try { _memory.Snapshot(_profile); } catch (Exception ex) { Log.Write("Window memory snapshot failed: " + ex.Message); }
+        };
+        if (!ScreenshotMode) _memoryTimer.Start();
 
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
@@ -319,6 +349,13 @@ public sealed class TrayApp : ApplicationContext
 
             Log.Write($"Apply ({(manual ? "manual" : "auto")}): {result.Summary}");
             WindowSnapshot.LogNow("after apply");
+
+            // Did a monitor come back? Then windows may need moving once things settle.
+            var activeIds = DisplayManager.Capture().Monitors.Where(m => m.IsActive).Select(m => m.MonitorId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (activeIds.Except(_lastActiveMonitorIds).Any() && _lastActiveMonitorIds.Count > 0) _restorePending = true;
+            _lastActiveMonitorIds = activeIds;
+        _memory.Note(activeIds.Count);
+
             _lateSnapshot.Stop();
             _lateSnapshot.Start();
 
@@ -468,6 +505,15 @@ public sealed class TrayApp : ApplicationContext
         Log.Write($"Enforce = {_settings.Enforce}");
         RefreshMenu();
         if (_settings.Enforce) ScheduleApply("enforce enabled");
+    }
+
+    private void ToggleRestoreWindows()
+    {
+        _settings.RestoreWindows = !_settings.RestoreWindows;
+        _settings.Save();
+        Log.Write($"RestoreWindows = {_settings.RestoreWindows}");
+        if (_settings.RestoreWindows && _profile != null) { try { _memory.Snapshot(_profile); } catch { /* next tick */ } }
+        RefreshMenu();
     }
 
     private void ToggleKeepAwake()
@@ -626,6 +672,7 @@ public sealed class TrayApp : ApplicationContext
         BuildLayoutsMenu();
         _enforceItem.Checked = _settings.Enforce;
         _keepAwakeItem.Checked = _settings.KeepAwake;
+        _restoreWindowsItem.Checked = _settings.RestoreWindows;
         _standInItem.Checked = _settings.VirtualStandIns;
         bool driver = _standIns.DriverPresent;
         _installDriverItem.Text = driver ? "Parsec virtual display driver: installed" : "Install Parsec virtual display driver...";
@@ -660,6 +707,7 @@ public sealed class TrayApp : ApplicationContext
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
+        _lastDisplayChange = DateTime.Now;
         _kvm.OnDisplayChange();
         // Capture what Windows just did to the windows, before we touch anything.
         WindowSnapshot.LogNow("right after display change");
@@ -910,6 +958,7 @@ public sealed class TrayApp : ApplicationContext
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _debounce.Dispose();
         _lateSnapshot.Dispose();
+        _memoryTimer.Dispose();
         _updateTimer.Dispose();
         _jiggler.Dispose();
         _devices.Dispose();

@@ -7,6 +7,9 @@ public static class Diagnostics
 {
     public static string DumpPath => Path.Combine(DisplayProfile.ConfigDir, "dump.txt");
 
+    /// <summary>Extra lines the running tray app contributes (window memory status etc.); null from the command line.</summary>
+    public static Func<string>? LiveStatus;
+
     public static string Build(LayoutStore store, Func<string>? kvmVerdict = null)
     {
         var saved = store.SelectForCurrentMonitors();
@@ -82,6 +85,13 @@ public static class Diagnostics
         text.AppendLine("INPUT");
         text.AppendLine($"  idle for {Jiggler.IdleTime().TotalSeconds:F0} s");
         text.AppendLine();
+
+        if (LiveStatus != null)
+        {
+            text.AppendLine("WINDOW MEMORY");
+            try { text.AppendLine("  " + LiveStatus()); } catch (Exception ex) { text.AppendLine("  unavailable: " + ex.Message); }
+            text.AppendLine();
+        }
 
         text.AppendLine("REMOTE DESKTOP WINDOWS");
         var rdp = RemoteDesktop.FindSessions();

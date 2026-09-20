@@ -40,16 +40,30 @@ public static class DpiScaling
         int rc = Native.DisplayConfigGetDeviceInfo(ref get);
         string raw = $"rc={rc} min={get.minScaleRel} cur={get.curScaleRel} max={get.maxScaleRel} src={t.SourceId}";
         if (rc != 0) return new Info(0, 0, 0, 0, raw);
+        return Decode(get.minScaleRel, get.curScaleRel, get.maxScaleRel, raw);
+    }
 
-        // minScaleRel is how many steps below the recommended one are allowed, so its magnitude is the recommended index.
-        // Windows sometimes reports a current value outside [min, max] (seen on a primary display); clamp like the
-        // Settings page does.
-        int cur = Math.Clamp(get.curScaleRel, get.minScaleRel, get.maxScaleRel);
-        int recommendedIdx = Math.Abs(get.minScaleRel);
+    /// <summary>
+    /// Turns the driver's relative indices into percentages. minScaleRel is how many steps below the recommended
+    /// one are allowed, so its magnitude is the recommended index. Windows sometimes reports a current value
+    /// outside [min, max] (seen on a primary display); it is clamped like the Settings page does.
+    /// Percent is 0 when the values make no sense.
+    /// </summary>
+    internal static Info Decode(int minRel, int curRel, int maxRel, string raw = "")
+    {
+        int cur = Math.Clamp(curRel, minRel, maxRel);
+        int recommendedIdx = Math.Abs(minRel);
         int curIdx = recommendedIdx + cur;
-        int maxIdx = recommendedIdx + get.maxScaleRel;
+        int maxIdx = recommendedIdx + maxRel;
         if (curIdx < 0 || curIdx >= Steps.Length || recommendedIdx >= Steps.Length) return new Info(0, 0, 0, 0, raw);
         return new Info(Steps[curIdx], Steps[recommendedIdx], Steps[0], Steps[Math.Clamp(maxIdx, 0, Steps.Length - 1)], raw);
+    }
+
+    /// <summary>The relative index to send for <paramref name="percent"/> given the recommended percentage, or null if not a step.</summary>
+    internal static int? EncodeRel(int percent, int recommended)
+    {
+        int targetIdx = Array.IndexOf(Steps, percent), recIdx = Array.IndexOf(Steps, recommended);
+        return targetIdx < 0 || recIdx < 0 ? null : targetIdx - recIdx;
     }
 
     /// <summary>Sets the scale for an adapter output. Returns a status string starting with "success" when it worked.</summary>

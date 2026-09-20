@@ -18,13 +18,15 @@
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>2.1.0</Version>
+    <Version>2.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- tools/ holds stand-alone file-based scripts (dotnet run tools/x.cs); keep them out of the app build. -->
     <Compile Remove="tools\**" />
+    <Compile Remove="tests\**" />
     <EmbeddedResource Include="assets\icon.ico" LogicalName="MonitorAnchor.icon.ico" />
+    <InternalsVisibleTo Include="MonitorAnchor.Tests" />
   </ItemGroup>
 
   <!-- Lets the updater pick the release asset that matches how this build was published. -->

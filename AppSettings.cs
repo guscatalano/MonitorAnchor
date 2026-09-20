@@ -30,6 +30,9 @@ public sealed class AppSettings
     /// <summary>When idle, hover and nudge the mouse over every visible window so hover-sensitive apps see activity.</summary>
     public bool WiggleAllWindows { get; set; } = false;
 
+    /// <summary>Remember window placements while the layout is intact and move windows back after a monitor returns.</summary>
+    public bool RestoreWindows { get; set; } = false;
+
     /// <summary>Set once the user has answered the "install to Programs folder?" offer, so it is not asked again.</summary>
     public bool InstallOfferAnswered { get; set; } = false;
 
