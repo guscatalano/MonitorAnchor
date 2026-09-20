@@ -30,6 +30,9 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _delayMenu;
     private readonly ToolStripMenuItem _jiggleItem;
     private readonly ToolStripMenuItem _rdpItem;
+    private readonly ToolStripMenuItem _tourItem;
+    private readonly ToolStripMenuItem _wuStatusItem;
+    private readonly ToolStripMenuItem _wuMenu;
     private readonly Jiggler _jiggler = new();
     private readonly ToolStripMenuItem _checkUpdatesItem;
     private readonly ToolStripMenuItem _autoUpdateItem;
@@ -81,6 +84,18 @@ public sealed class TrayApp : ApplicationContext
         _jiggler.JiggleMouse = _settings.JiggleWhenIdle;
         _rdpItem = new ToolStripMenuItem("Keep Remote Desktop sessions alive when idle", null, (_, _) => ToggleRdp()) { CheckOnClick = false };
         _jiggler.KeepRdpAlive = _settings.KeepRdpAlive;
+        _tourItem = new ToolStripMenuItem("Wiggle mouse over every window when idle", null, (_, _) => ToggleTour()) { CheckOnClick = false };
+        _jiggler.WiggleAllWindows = _settings.WiggleAllWindows;
+
+        // Windows Update pause lives in its own submenu; every action prompts for administrator approval.
+        _wuStatusItem = new ToolStripMenuItem("Status") { Enabled = false };
+        _wuMenu = new ToolStripMenuItem("Windows Update");
+        _wuMenu.DropDownItems.Add(_wuStatusItem);
+        _wuMenu.DropDownItems.Add(new ToolStripSeparator());
+        foreach (var (label, days) in new[] { ("Pause for 1 week", 7), ("Pause for 5 weeks", 35), ("Pause for 6 months", 182), ("Pause for 1 year", 365) })
+            _wuMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => PauseUpdates(days)));
+        _wuMenu.DropDownItems.Add(new ToolStripSeparator());
+        _wuMenu.DropDownItems.Add(new ToolStripMenuItem("Resume updates", null, (_, _) => PauseUpdates(0)));
 
         // Everything about fake monitors lives in one submenu.
         _standInItem = new ToolStripMenuItem("Enabled (stand in for unplugged monitors)", null, (_, _) => ToggleStandIns()) { CheckOnClick = false };
@@ -111,7 +126,9 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(_keepAwakeItem);
         menu.Items.Add(_jiggleItem);
         menu.Items.Add(_rdpItem);
+        menu.Items.Add(_tourItem);
         menu.Items.Add(fakeMenu);
+        menu.Items.Add(_wuMenu);
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_showItem);
@@ -496,6 +513,9 @@ public sealed class TrayApp : ApplicationContext
         _autoUpdateItem.Checked = _settings.AutoUpdate;
         _jiggleItem.Checked = _settings.JiggleWhenIdle;
         _rdpItem.Checked = _settings.KeepRdpAlive;
+        _tourItem.Checked = _settings.WiggleAllWindows;
+        var pausedUntil = WindowsUpdate.PausedUntil();
+        _wuStatusItem.Text = pausedUntil == null ? "Updates are not paused" : $"Paused until {pausedUntil:g}";
         _checkUpdatesItem.Enabled = !_checkingUpdates;
         _checkUpdatesItem.Text = _checkingUpdates ? "Checking for updates..." : "Check for updates now";
         _startupItem.Checked = Startup.IsEnabled();
@@ -553,6 +573,32 @@ public sealed class TrayApp : ApplicationContext
         _jiggler.KeepRdpAlive = _settings.KeepRdpAlive;
         var sessions = RemoteDesktop.FindSessions();
         Log.Write($"KeepRdpAlive = {_settings.KeepRdpAlive} (after {_settings.JiggleIdleSeconds} s idle; {sessions.Count} Remote Desktop window(s) open now)");
+        RefreshMenu();
+    }
+
+    private void ToggleTour()
+    {
+        _settings.WiggleAllWindows = !_settings.WiggleAllWindows;
+        _settings.Save();
+        _jiggler.WiggleAllWindows = _settings.WiggleAllWindows;
+        Log.Write($"WiggleAllWindows = {_settings.WiggleAllWindows} (after {_settings.JiggleIdleSeconds} s idle)");
+        RefreshMenu();
+    }
+
+    private void PauseUpdates(int days)
+    {
+        string what = days == 0 ? "resume Windows Update" : $"pause Windows Update for {days} days";
+        if (MessageBox.Show($"Monitor Anchor will {what}. Windows will ask for administrator approval.\n\nContinue?",
+                "Windows Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+        int rc = WindowsUpdate.RequestPause(days);
+        var until = WindowsUpdate.PausedUntil();
+        string msg = rc == -1 ? "Administrator approval was declined; nothing changed."
+                   : rc != 0 ? $"The elevated helper failed (code {rc}); see the log."
+                   : until == null ? "Windows Update resumed."
+                   : $"Windows Update paused until {until:g}.";
+        Log.Write($"Windows Update request ({what}): {msg}");
+        _tray.ShowBalloonTip(5000, "Windows Update", msg, rc == 0 ? ToolTipIcon.Info : ToolTipIcon.Warning);
         RefreshMenu();
     }
 

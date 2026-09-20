@@ -50,9 +50,18 @@ public sealed class Jiggler : IDisposable
         set { _keepRdpAlive = value; UpdateTimer(); }
     }
 
+    private bool _wiggleAll;
+    public int TourCount { get; private set; }
+
+    public bool WiggleAllWindows
+    {
+        get => _wiggleAll;
+        set { _wiggleAll = value; UpdateTimer(); }
+    }
+
     private void UpdateTimer()
     {
-        if (_jiggleMouse || _keepRdpAlive) _timer.Start(); else _timer.Stop();
+        if (_jiggleMouse || _keepRdpAlive || _wiggleAll) _timer.Start(); else _timer.Stop();
     }
 
     public static TimeSpan IdleTime()
@@ -67,6 +76,8 @@ public sealed class Jiggler : IDisposable
         var idle = IdleTime();
         if (idle < IdleThreshold) return;
 
+        bool didSomething = false;
+
         if (_keepRdpAlive)
         {
             var sessions = RemoteDesktop.FindSessions();
@@ -79,9 +90,27 @@ public sealed class Jiggler : IDisposable
                 if (RdpPokeCount <= 3 || RdpPokeCount % 20 == 0)
                     Log.Write($"RDP keep-alive: idle {idle.TotalSeconds:F0} s, {sessions.Count} session(s) poked (round {RdpPokeCount}):" +
                               string.Concat(lines.Select(l => Environment.NewLine + "    " + l)));
-                return; // the key presses count as local input too, so no mouse nudge is needed
+                didSomething = true;
             }
         }
+
+        if (_wiggleAll)
+        {
+            try
+            {
+                var r = MouseTour.Run();
+                TourCount++;
+                if (TourCount <= 3 || TourCount % 20 == 0)
+                    Log.Write($"Mouse tour: idle {idle.TotalSeconds:F0} s, hovered over {r.Visited} window(s), {r.Hidden} fully covered (round {TourCount}): {string.Join(", ", r.Names)}");
+                didSomething = r.Visited > 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("Mouse tour failed: " + ex.Message);
+            }
+        }
+
+        if (didSomething) return; // that already counted as local input
 
         if (_jiggleMouse)
         {

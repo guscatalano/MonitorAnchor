@@ -44,6 +44,22 @@ internal static class Program
             return;
         }
 
+        // Elevated helper: --pause-updates <days> (0 = resume). Launched by the tray app with a UAC prompt.
+        int pauseIdx = Array.FindIndex(args, a => string.Equals(a, "--pause-updates", StringComparison.OrdinalIgnoreCase));
+        if (pauseIdx >= 0 && pauseIdx + 1 < args.Length && int.TryParse(args[pauseIdx + 1], out int pauseDays))
+        {
+            Environment.Exit(WindowsUpdate.ApplyElevated(pauseDays));
+            return;
+        }
+
+        // Diagnostic: run one mouse tour now and log which windows were reached.
+        if (args.Any(a => string.Equals(a, "--tour", StringComparison.OrdinalIgnoreCase)))
+        {
+            var r = MouseTour.Run();
+            Log.Write($"Mouse tour (command line): hovered over {r.Visited} window(s), {r.Hidden} fully covered: {string.Join(", ", r.Names)}");
+            return;
+        }
+
         // Diagnostic: list child window classes of windows whose title contains the given text: --classes <text>
         int clsIdx = Array.FindIndex(args, a => string.Equals(a, "--classes", StringComparison.OrdinalIgnoreCase));
         if (clsIdx >= 0 && clsIdx + 1 < args.Length)
