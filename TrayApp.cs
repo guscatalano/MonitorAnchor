@@ -21,6 +21,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly SynchronizationContext _ui;
     private bool _installingDriver;
     private readonly System.Windows.Forms.Timer _debounce;
+    private readonly System.Windows.Forms.Timer _lateSnapshot;
 
     private readonly AppSettings _settings;
     private DisplayProfile? _profile;
@@ -77,6 +78,10 @@ public sealed class TrayApp : ApplicationContext
         _debounce = new System.Windows.Forms.Timer { Interval = DebounceMs };
         _debounce.Tick += (_, _) => OnDebounceElapsed();
 
+        // Windows' own "remember window locations" restore can land a few seconds after a reconnect.
+        _lateSnapshot = new System.Windows.Forms.Timer { Interval = 5000 };
+        _lateSnapshot.Tick += (_, _) => { _lateSnapshot.Stop(); WindowSnapshot.LogNow("5 s after apply"); };
+
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.SessionSwitch += OnSessionSwitch;
@@ -94,6 +99,7 @@ public sealed class TrayApp : ApplicationContext
 
         RefreshMenu();
         ApplyKeepAwake();
+        WindowSnapshot.LogNow("startup");
         Log.Write($"Started. Profile: {(_profile == null ? "none" : $"{_profile.Monitors.Count} monitor(s) from {_profile.CapturedAt}")}, enforce={_settings.Enforce}");
 
         if (_profile == null)
@@ -186,6 +192,9 @@ public sealed class TrayApp : ApplicationContext
             }
 
             Log.Write($"Apply ({(manual ? "manual" : "auto")}): {result.Summary}");
+            WindowSnapshot.LogNow("after apply");
+            _lateSnapshot.Stop();
+            _lateSnapshot.Start();
 
             if (result.HadFailures)
             {
@@ -396,7 +405,12 @@ public sealed class TrayApp : ApplicationContext
 
     // ---- Display change handling -----------------------------------------------------------------
 
-    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => ScheduleApply("display settings changed");
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        // Capture what Windows just did to the windows, before we touch anything.
+        WindowSnapshot.LogNow("right after display change");
+        ScheduleApply("display settings changed");
+    }
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
     {
@@ -439,6 +453,7 @@ public sealed class TrayApp : ApplicationContext
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _debounce.Dispose();
+        _lateSnapshot.Dispose();
         _standIns.Dispose(); // retires any fake monitors
         Native.SetThreadExecutionState(Native.ES_CONTINUOUS); // release the keep-awake hold
         _tray.Visible = false;

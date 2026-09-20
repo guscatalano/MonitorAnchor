@@ -31,6 +31,13 @@ internal static class Program
             return;
         }
 
+        // Diagnostic: log where every window is right now.
+        if (args.Any(a => string.Equals(a, "--windows", StringComparison.OrdinalIgnoreCase)))
+        {
+            WindowSnapshot.LogNow("command line");
+            return;
+        }
+
         // Scriptable equivalents of the tray menu items.
         if (args.Any(a => string.Equals(a, "--persist", StringComparison.OrdinalIgnoreCase)))
         {
