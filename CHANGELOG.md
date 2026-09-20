@@ -3,6 +3,19 @@
 All notable changes to Monitor Anchor. The release workflow uses the section for the tagged version as the
 release notes, so keep the heading format `## X.Y.Z - YYYY-MM-DD`.
 
+## 2.3.0 - 2026-09-20
+
+**New**
+- **Presence in the log.** A line when input stops for five minutes ("away, no input since 03:52"), a line when it
+  resumes ("back after 5 h 10 min away"), and a heartbeat every half hour, so the log says whether anyone was at
+  the machine when something happened.
+- **Display power in the log.** "Displays turned off/on/dimmed by Windows" whenever Windows changes the
+  console display state, plus session lock/unlock/connect lines.
+- **Human input is told apart from injected input.** Low-level hooks see the "injected" flag on synthetic
+  events, so the app's own jiggles, tours and F15 presses no longer count as the user being present, and the
+  idle keep-alives no longer reset their own idle clock. Diagnostics reports human idle versus system idle and
+  counts injected input from other software.
+
 ## 2.2.0 - 2026-09-20
 
 **New**

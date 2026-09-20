@@ -73,7 +73,7 @@ public sealed class Jiggler : IDisposable
 
     private void Tick()
     {
-        var idle = IdleTime();
+        var idle = InputTracker.HumanIdleTime(); // our own injected input must not count as the user being back
         if (idle < IdleThreshold) return;
 
         bool didSomething = false;
@@ -120,6 +120,7 @@ public sealed class Jiggler : IDisposable
                 new INPUT { type = INPUT_MOUSE, mi = new MOUSEINPUT { dx = -1, dy = 0, dwFlags = MOUSEEVENTF_MOVE } },
             };
             uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+            InputTracker.MarkOwnInjection();
             JiggleCount++;
             if (JiggleCount == 1 || JiggleCount % 20 == 0)
                 Log.Write($"Jiggle: idle {idle.TotalSeconds:F0} s, nudged mouse ({sent}/2 inputs sent, {JiggleCount} total)");

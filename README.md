@@ -142,6 +142,13 @@ connected and only switch USB; those show up as **KVM switch away (USB only)**. 
 network or storage with it is logged as **Undocked** / **Docked** instead. Counts are kept across restarts and
 summarised in diagnostics, along with whether the monitors' EDIDs look real or emulated.
 
+### What the log tells you
+
+Besides every layout decision, the log records the context you need to read it later: whether someone was at the
+keyboard ("Presence: away", "back after 5 h 10 min", a heartbeat every half hour), when Windows turned the
+displays off or on, session lock and unlock, every USB device arrival and removal, KVM switches and dock events,
+and window positions around each display change.
+
 ### Log viewer
 
 Tails the log as the app works, so you can watch a plug, unplug or KVM switch being handled in real time.

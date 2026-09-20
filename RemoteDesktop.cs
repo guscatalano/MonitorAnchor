@@ -155,6 +155,7 @@ public static class RemoteDesktop
             new MINPUT { type = 0, mi = new MOUSEINPUT { dx = -3, dy = 0, dwFlags = 0x0001 } },
         };
         SendMouseInput((uint)inputs.Length, inputs, Marshal.SizeOf<MINPUT>());
+        InputTracker.MarkOwnInjection();
     }
 
     /// <summary>Diagnostic: top-level windows whose title contains <paramref name="titlePart"/>, with their child window classes.</summary>
@@ -193,5 +194,6 @@ public static class RemoteDesktop
             new INPUT { type = INPUT_KEYBOARD, ki = new KEYBDINPUT { wVk = VK_F15, dwFlags = KEYEVENTF_KEYUP } },
         };
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        InputTracker.MarkOwnInjection();
     }
 }

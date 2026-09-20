@@ -103,5 +103,6 @@ public static class MouseTour
             new INPUT { type = 0, mi = new MOUSEINPUT { dx = -4, dy = -2, dwFlags = 0x0001 } },
         };
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        InputTracker.MarkOwnInjection();
     }
 }

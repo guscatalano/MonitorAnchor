@@ -16,6 +16,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly AppState _state;
     private readonly KvmDetector _kvm;
     private readonly DeviceWatcher _devices;
+    private Presence? _presence;
 
     /// <summary>Set by --screenshots: build the UI without registering startup, learning a layout or enforcing anything.</summary>
     public static bool ScreenshotMode;
@@ -81,7 +82,16 @@ public sealed class TrayApp : ApplicationContext
         _kvm = new KvmDetector(_state);
         _devices = new DeviceWatcher();
         _devices.DeviceChanged += _kvm.OnDevice;
-        Diagnostics.LiveStatus = () => (_settings.RestoreWindows ? "on: " : "off: ") + _memory.Status;
+        _devices.DisplayPowerChanged += state => Log.Write(state switch
+        {
+            0 => "Displays turned off by Windows (power/idle)",
+            1 => "Displays turned on by Windows",
+            2 => "Displays dimmed by Windows",
+            _ => $"Display power state {state}",
+        });
+        if (!ScreenshotMode) { InputTracker.Start(); _presence = new Presence(); }
+        Diagnostics.LiveStatus = () => (_settings.RestoreWindows ? "on: " : "off: ") + _memory.Status + Environment.NewLine +
+                                       "  presence: " + (_presence?.Status ?? "n/a");
 
         _persistItem = new ToolStripMenuItem("Persist current layout", null, (_, _) => Persist())
         {
@@ -721,6 +731,7 @@ public sealed class TrayApp : ApplicationContext
 
     private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
     {
+        Log.Write($"Session: {e.Reason}");
         if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteDisconnect)
             ScheduleApply(e.Reason.ToString());
     }
@@ -961,6 +972,8 @@ public sealed class TrayApp : ApplicationContext
         _memoryTimer.Dispose();
         _updateTimer.Dispose();
         _jiggler.Dispose();
+        _presence?.Dispose();
+        InputTracker.Stop();
         _devices.Dispose();
         _kvm.Dispose();
         _standIns.Dispose(); // retires any fake monitors

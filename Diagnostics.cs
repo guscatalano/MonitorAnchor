@@ -83,12 +83,12 @@ public static class Diagnostics
         text.AppendLine();
 
         text.AppendLine("INPUT");
-        text.AppendLine($"  idle for {Jiggler.IdleTime().TotalSeconds:F0} s");
+        text.AppendLine("  " + InputTracker.Status);
         text.AppendLine();
 
         if (LiveStatus != null)
         {
-            text.AppendLine("WINDOW MEMORY");
+            text.AppendLine("WINDOW MEMORY / PRESENCE");
             try { text.AppendLine("  " + LiveStatus()); } catch (Exception ex) { text.AppendLine("  unavailable: " + ex.Message); }
             text.AppendLine();
         }
