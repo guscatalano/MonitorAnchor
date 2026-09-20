@@ -8,6 +8,13 @@ public sealed class AppSettings
     /// <summary>When true, the saved layout is re-applied automatically on every display change.</summary>
     public bool Enforce { get; set; } = true;
 
+    /// <summary>
+    /// What to do when the display settings change while you are at the keyboard and no monitor came or went,
+    /// i.e. you (or an app you launched) changed them on purpose: "update" saves them as the layout after a short
+    /// grace period, "ask" shows a notification you can click to save them, "revert" puts the layout back.
+    /// </summary>
+    public string UserChanges { get; set; } = "update";
+
     /// <summary>When true, the display and system idle timers are held so the screens never sleep.</summary>
     public bool KeepAwake { get; set; } = true;
 

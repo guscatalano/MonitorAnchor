@@ -3,6 +3,16 @@
 All notable changes to Monitor Anchor. The release workflow uses the section for the tagged version as the
 release notes, so keep the heading format `## X.Y.Z - YYYY-MM-DD`.
 
+## 2.6.0 - 2026-09-20
+
+**Changed**
+- **Your own changes are no longer undone.** A display-settings change with the same monitors connected, while
+  someone is at the keyboard, and not caused by the app, is treated as intentional. After a 20-second grace
+  period (long enough for Windows' own "Keep these display settings?" prompt to revert) the live settings are
+  saved as the layout, with a notification saying what changed. *When I change display settings myself* in the
+  menu chooses between updating the layout (default), asking with a clickable notification, or the old
+  behaviour of putting the layout back. Enforcement on plug/unplug, resume, unlock and startup is unchanged.
+
 ## 2.5.0 - 2026-09-20
 
 **New**

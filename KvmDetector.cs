@@ -72,7 +72,8 @@ public sealed class KvmDetector : IDisposable
         Topology.ConnectedMonitors().Select(t => t.MonitorId).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Call on every display-change event: diffs the connected monitor set against the last one.</summary>
-    public void OnDisplayChange()
+    /// <summary>Returns how many monitors left and arrived since the last call, so the caller knows whether the topology changed.</summary>
+    public (int Removed, int Added) OnDisplayChange()
     {
         var now = CurrentMonitors();
         int removed = _connected.Count(id => !now.Contains(id));
@@ -89,6 +90,7 @@ public sealed class KvmDetector : IDisposable
             _events.Add((at, "retrain", "r" + (++_monitorSeq)));
         }
         Restart();
+        return (removed, added);
     }
 
     /// <summary>Call for every device interface arrival/removal (from <see cref="DeviceWatcher"/>).</summary>

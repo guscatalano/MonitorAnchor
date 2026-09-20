@@ -106,4 +106,25 @@ public sealed class DisplayProfile
 
     public override string ToString() =>
         Monitors.Count == 0 ? "(no monitors)" : string.Join(Environment.NewLine, Monitors.Select(m => "\u2022 " + m));
+
+    /// <summary>Human-readable differences between a live capture and this saved layout, per monitor. Empty when they match.</summary>
+    public List<string> DifferencesFrom(DisplayProfile live)
+    {
+        var diffs = new List<string>();
+        foreach (var l in live.Monitors.Where(m => m.IsActive))
+        {
+            var s = FindFor(l);
+            if (s == null) continue;
+            var parts = new List<string>();
+            if (s.Width != l.Width || s.Height != l.Height) parts.Add($"{s.Width}x{s.Height} -> {l.Width}x{l.Height}");
+            if (s.RefreshRate != l.RefreshRate) parts.Add($"{s.RefreshRate} Hz -> {l.RefreshRate} Hz");
+            if (s.PositionX != l.PositionX || s.PositionY != l.PositionY) parts.Add($"position ({s.PositionX},{s.PositionY}) -> ({l.PositionX},{l.PositionY})");
+            if (s.Orientation != l.Orientation) parts.Add($"rotation {s.Orientation * 90}\u00b0 -> {l.Orientation * 90}\u00b0");
+            if (s.IsPrimary != l.IsPrimary) parts.Add(l.IsPrimary ? "now primary" : "no longer primary");
+            if (s.HdrSupported && l.HdrSupported && s.HdrEnabled != l.HdrEnabled) parts.Add($"HDR {(s.HdrEnabled ? "on" : "off")} -> {(l.HdrEnabled ? "on" : "off")}");
+            if (s.DpiScale > 0 && l.DpiScale > 0 && s.DpiScale != l.DpiScale) parts.Add($"scale {s.DpiScale}% -> {l.DpiScale}%");
+            if (parts.Count > 0) diffs.Add($"{l.MonitorName} ({l.AdapterName}): {string.Join(", ", parts)}");
+        }
+        return diffs;
+    }
 }

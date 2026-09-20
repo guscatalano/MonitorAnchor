@@ -29,6 +29,8 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _keepAwakeItem;
     private readonly ToolStripMenuItem _restoreWindowsItem;
+    private readonly ToolStripMenuItem _userChangesMenu;
+    private readonly System.Windows.Forms.Timer _userChange;
     private readonly WindowMemory _memory = new();
     private readonly System.Windows.Forms.Timer _memoryTimer;
     private HashSet<string> _lastActiveMonitorIds = new(StringComparer.OrdinalIgnoreCase);
@@ -108,6 +110,11 @@ public sealed class TrayApp : ApplicationContext
         _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup()) { CheckOnClick = false };
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
         _restoreWindowsItem = new ToolStripMenuItem("When a monitor returns, move windows back", null, (_, _) => ToggleRestoreWindows()) { CheckOnClick = false };
+        _userChangesMenu = new ToolStripMenuItem("When I change display settings myself");
+        foreach (var (label, mode) in new[] { ("Update the saved layout (after 20 s)", "update"), ("Ask me with a notification", "ask"), ("Put the saved layout back", "revert") })
+            _userChangesMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => SetUserChanges(mode)) { Tag = mode });
+        _userChange = new System.Windows.Forms.Timer { Interval = UserChangeGraceMs };
+        _userChange.Tick += (_, _) => OnUserChangeSettled();
         // Everything that happens while you are idle lives in one submenu. The mouse choice is one-of-three
         // (hovering over every window already includes a nudge); poking Remote Desktop is separate because it
         // also takes focus and presses a key.
@@ -171,6 +178,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_enforceItem);
+        menu.Items.Add(_userChangesMenu);
         menu.Items.Add(_restoreWindowsItem);
         menu.Items.Add(_keepAwakeItem);
         menu.Items.Add(idleMenu);
@@ -200,6 +208,7 @@ public sealed class TrayApp : ApplicationContext
             Visible = true,
         };
         _tray.DoubleClick += (_, _) => Persist();
+        _tray.BalloonTipClicked += (_, _) => OnBalloonClicked();
 
         _debounce = new System.Windows.Forms.Timer { Interval = DebounceMs };
         _debounce.Tick += (_, _) => OnDebounceElapsed();
@@ -371,6 +380,7 @@ public sealed class TrayApp : ApplicationContext
             }
 
             var result = DisplayManager.Apply(_profile);
+            if (result.MadeChanges) _ownChangeUntil = DateTime.Now.AddSeconds(5); // the change events that follow are ours
 
             if (_settings.VirtualStandIns)
             {
@@ -755,6 +765,8 @@ public sealed class TrayApp : ApplicationContext
         _applyItem.Enabled = hasProfile;
         BuildLayoutsMenu();
         _enforceItem.Checked = _settings.Enforce;
+        foreach (ToolStripMenuItem item in _userChangesMenu.DropDownItems)
+            item.Checked = (string)item.Tag! == _settings.UserChanges;
         _keepAwakeItem.Checked = _settings.KeepAwake;
         _restoreWindowsItem.Checked = _settings.RestoreWindows;
         _standInItem.Checked = _settings.VirtualStandIns;
@@ -795,10 +807,73 @@ public sealed class TrayApp : ApplicationContext
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
         _lastDisplayChange = DateTime.Now;
-        _kvm.OnDisplayChange();
+        var (removed, added) = _kvm.OnDisplayChange();
         // Capture what Windows just did to the windows, before we touch anything.
         WindowSnapshot.LogNow("right after display change");
+
+        // Same monitors, a person at the keyboard, and not our own apply: that is a deliberate change (yours, or an
+        // app you launched), not Windows shuffling things. Fighting it makes settings impossible to change.
+        bool ours = DateTime.Now < _ownChangeUntil;
+        bool humanPresent = InputTracker.HumanIdleTime() < TimeSpan.FromSeconds(60);
+        if (removed + added == 0 && humanPresent && !ours && _settings.Enforce && _profile != null && _settings.UserChanges != "revert")
+        {
+            Log.Write($"Display settings changed with the same monitors while you were active: treating as intentional ({_settings.UserChanges}); checking in {UserChangeGraceMs / 1000} s");
+            _userChange.Stop();
+            _userChange.Start();
+            return;
+        }
         ScheduleApply("display settings changed");
+    }
+
+    private const int UserChangeGraceMs = 20_000; // Windows' own "Keep these display settings?" prompt reverts after 15 s
+    private DateTime _ownChangeUntil = DateTime.MinValue;
+
+    /// <summary>Grace period over: whatever is live now is what the user meant. Save it, or offer to.</summary>
+    private void OnUserChangeSettled()
+    {
+        _userChange.Stop();
+        if (_profile == null) return;
+        var live = DisplayManager.CaptureForProfile();
+        var diffs = _profile.DifferencesFrom(live);
+        if (diffs.Count == 0)
+        {
+            Log.Write("Intentional change: settings are back to the saved layout (reverted or temporary); nothing to do");
+            return;
+        }
+        string summary = string.Join("; ", diffs);
+        if (_settings.UserChanges == "update")
+        {
+            _store.Upsert(live);
+            RefreshActiveLayout();
+            Log.Write($"Layout \"{_profile?.Name}\" updated from your change: {summary}");
+            _tray.ShowBalloonTip(6000, "Layout updated", summary + Environment.NewLine + "Saved as the layout for these monitors.", ToolTipIcon.Info);
+        }
+        else
+        {
+            Log.Write($"Intentional change kept, not saved: {summary}. Click the notification or choose Persist to save it.");
+            _pendingUserChange = live;
+            _tray.ShowBalloonTip(10000, "Keep these display settings?", summary + Environment.NewLine + "Click to save them as the layout. Otherwise they stay until the next monitor change.", ToolTipIcon.Info);
+        }
+    }
+
+    private DisplayProfile? _pendingUserChange;
+
+    private void OnBalloonClicked()
+    {
+        if (_pendingUserChange == null) return;
+        _store.Upsert(_pendingUserChange);
+        _pendingUserChange = null;
+        RefreshActiveLayout();
+        Log.Write($"Layout \"{_profile?.Name}\" updated from the notification");
+        _tray.ShowBalloonTip(3000, "Layout updated", "Your display settings are now the saved layout.", ToolTipIcon.Info);
+    }
+
+    private void SetUserChanges(string mode)
+    {
+        _settings.UserChanges = mode;
+        _settings.Save();
+        Log.Write($"UserChanges = {mode}");
+        RefreshMenu();
     }
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
@@ -1047,6 +1122,7 @@ public sealed class TrayApp : ApplicationContext
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _debounce.Dispose();
         _lateSnapshot.Dispose();
+        _userChange.Dispose();
         _memoryTimer.Dispose();
         _updateTimer.Dispose();
         _jiggler.Dispose();
