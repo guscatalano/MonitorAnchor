@@ -246,4 +246,41 @@ internal static class Native
     [DllImport("user32.dll")] public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2 requestPacket);
     [DllImport("user32.dll")] public static extern int DisplayConfigSetDeviceInfo(ref DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE setPacket);
     [DllImport("user32.dll")] public static extern int DisplayConfigSetDeviceInfo(ref DISPLAYCONFIG_SET_HDR_STATE setPacket);
+
+    // ---- Device I/O (used by the Parsec virtual display driver client) ------------------------------
+
+    public const uint GENERIC_READ = 0x80000000;
+    public const uint GENERIC_WRITE = 0x40000000;
+    public const uint FILE_SHARE_READ = 0x1;
+    public const uint FILE_SHARE_WRITE = 0x2;
+    public const uint OPEN_EXISTING = 3;
+    public const uint FILE_ATTRIBUTE_NORMAL = 0x80;
+    public const uint FILE_FLAG_NO_BUFFERING = 0x20000000;
+    public const uint FILE_FLAG_OVERLAPPED = 0x40000000;
+    public const uint FILE_FLAG_WRITE_THROUGH = 0x80000000;
+    public const uint CM_GET_DEVICE_INTERFACE_LIST_PRESENT = 0;
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    public static extern int CM_Get_Device_Interface_List_SizeW(out uint pulLen, ref Guid interfaceClassGuid, string? pDeviceID, uint ulFlags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    public static extern int CM_Get_Device_Interface_ListW(ref Guid interfaceClassGuid, string? pDeviceID, [Out] char[] buffer, uint bufferLen, uint ulFlags);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+        IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle hDevice, uint dwIoControlCode, IntPtr lpInBuffer, uint nInBufferSize,
+        IntPtr lpOutBuffer, uint nOutBufferSize, IntPtr lpBytesReturned, IntPtr lpOverlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetOverlappedResultEx(Microsoft.Win32.SafeHandles.SafeFileHandle hFile, IntPtr lpOverlapped, out uint lpNumberOfBytesTransferred,
+        uint dwMilliseconds, bool bAlertable);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateEventW(IntPtr lpEventAttributes, bool bManualReset, bool bInitialState, string? lpName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
 }

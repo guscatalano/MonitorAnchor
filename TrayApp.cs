@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http;
 using System.Drawing.Drawing2D;
 using Microsoft.Win32;
 
@@ -14,6 +15,11 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _enforceItem;
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _keepAwakeItem;
+    private readonly ToolStripMenuItem _standInItem;
+    private readonly ToolStripMenuItem _installDriverItem;
+    private readonly StandInManager _standIns = new();
+    private readonly SynchronizationContext _ui;
+    private bool _installingDriver;
     private readonly System.Windows.Forms.Timer _debounce;
 
     private readonly AppSettings _settings;
@@ -29,6 +35,7 @@ public sealed class TrayApp : ApplicationContext
 
     public TrayApp()
     {
+        _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settings = AppSettings.Load();
         _profile = DisplayProfile.Load();
 
@@ -41,6 +48,8 @@ public sealed class TrayApp : ApplicationContext
         _enforceItem = new ToolStripMenuItem("Enforce layout on display changes", null, (_, _) => ToggleEnforce()) { CheckOnClick = false };
         _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup()) { CheckOnClick = false };
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
+        _standInItem = new ToolStripMenuItem("Fake monitors when real ones unplug", null, (_, _) => ToggleStandIns()) { CheckOnClick = false };
+        _installDriverItem = new ToolStripMenuItem("Install Parsec virtual display driver...", null, (_, _) => InstallDriver());
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(_persistItem);
@@ -49,6 +58,8 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_enforceItem);
         menu.Items.Add(_keepAwakeItem);
+        menu.Items.Add(_standInItem);
+        menu.Items.Add(_installDriverItem);
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Open log", null, (_, _) => OpenLog()));
@@ -88,7 +99,7 @@ public sealed class TrayApp : ApplicationContext
         if (_profile == null)
         {
             // First run: learn whatever the layout is right now and enforce it from here on.
-            var learned = DisplayManager.Capture();
+            var learned = DisplayManager.CaptureForProfile();
             if (learned.Monitors.Count > 0)
             {
                 learned.Save();
@@ -120,7 +131,7 @@ public sealed class TrayApp : ApplicationContext
     {
         try
         {
-            var captured = DisplayManager.Capture();
+            var captured = DisplayManager.CaptureForProfile();
             if (captured.Monitors.Count == 0)
             {
                 _tray.ShowBalloonTip(4000, "Monitor Anchor", "No active monitors found to capture.", ToolTipIcon.Warning);
@@ -153,7 +164,27 @@ public sealed class TrayApp : ApplicationContext
         _applying = true;
         try
         {
+            // A real monitor that just came back must get its spot before we position it: retire its stand-in first.
+            if (_settings.VirtualStandIns && _standIns.RemoveSurplus(_profile))
+            {
+                Log.Write("Stand-in retired; re-checking after the display change settles");
+                ScheduleApply("stand-in removed");
+                return;
+            }
+
             var result = DisplayManager.Apply(_profile);
+
+            if (_settings.VirtualStandIns)
+            {
+                var standIn = _standIns.AddAndPosition(_profile);
+                if (standIn != null)
+                {
+                    result = new ApplyResult(result.Changed + standIn.Changed, result.Failed + standIn.Failed, result.Unmatched,
+                        (result.MadeChanges || result.HadFailures ? result.Summary + Environment.NewLine : "") + standIn.Summary);
+                    if (standIn.MadeChanges) ScheduleApply("stand-in changed");
+                }
+            }
+
             Log.Write($"Apply ({(manual ? "manual" : "auto")}): {result.Summary}");
 
             if (result.HadFailures)
@@ -220,6 +251,102 @@ public sealed class TrayApp : ApplicationContext
         Log.Write($"KeepAwake = {_settings.KeepAwake} (SetThreadExecutionState {(prev == 0 ? "failed" : "ok")})");
     }
 
+    private void ToggleStandIns()
+    {
+        _settings.VirtualStandIns = !_settings.VirtualStandIns;
+        _settings.Save();
+        Log.Write($"VirtualStandIns = {_settings.VirtualStandIns}");
+        RefreshMenu();
+
+        if (!_settings.VirtualStandIns)
+        {
+            _standIns.RemoveAll();
+            return;
+        }
+        if (!_standIns.DriverPresent)
+        {
+            var answer = MessageBox.Show(
+                "Fake monitors need the Parsec Virtual Display Driver, which is not installed.\n\n" +
+                "Download and install it now? Windows will ask for administrator approval.",
+                "Monitor Anchor", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer == DialogResult.Yes) InstallDriver();
+            return;
+        }
+        ScheduleApply("stand-ins enabled");
+    }
+
+    private const string DriverInstallerUrl = "https://builds.parsec.app/vdd/parsec-vdd-0.41.0.0.exe";
+
+    /// <summary>Downloads the Parsec Virtual Display Driver installer and runs it silently (elevation prompt).</summary>
+    private void InstallDriver()
+    {
+        if (_standIns.DriverPresent)
+        {
+            _tray.ShowBalloonTip(3000, "Monitor Anchor", "The Parsec virtual display driver is already installed.", ToolTipIcon.Info);
+            return;
+        }
+        if (_installingDriver) return;
+
+        if (MessageBox.Show(
+                "Monitor Anchor will download the Parsec Virtual Display Driver installer (about 2 MB) from\n" +
+                DriverInstallerUrl + "\nand run it silently. Windows will ask for administrator approval.\n\nContinue?",
+                "Install virtual display driver", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        _installingDriver = true;
+        _installDriverItem.Enabled = false;
+        _tray.ShowBalloonTip(3000, "Monitor Anchor", "Downloading the Parsec virtual display driver...", ToolTipIcon.Info);
+
+        Task.Run(async () =>
+        {
+            string message; ToolTipIcon icon;
+            try
+            {
+                string installer = Path.Combine(DisplayProfile.ConfigDir, Path.GetFileName(DriverInstallerUrl));
+                Directory.CreateDirectory(DisplayProfile.ConfigDir);
+                using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(3) })
+                {
+                    var bytes = await http.GetByteArrayAsync(DriverInstallerUrl);
+                    await File.WriteAllBytesAsync(installer, bytes);
+                }
+                Log.Write($"Driver installer downloaded to {installer}; launching with /S");
+
+                using var proc = Process.Start(new ProcessStartInfo(installer, "/S") { UseShellExecute = true, Verb = "runas" })
+                    ?? throw new InvalidOperationException("installer did not start");
+                await proc.WaitForExitAsync();
+                Log.Write($"Driver installer exited with code {proc.ExitCode}");
+
+                // Give Plug and Play a moment to bring the device up.
+                for (int i = 0; i < 20 && !_standIns.DriverPresent; i++) await Task.Delay(500);
+
+                if (_standIns.DriverPresent)
+                {
+                    message = "Parsec virtual display driver installed. Fake monitors are ready.";
+                    icon = ToolTipIcon.Info;
+                }
+                else
+                {
+                    message = $"The installer finished (exit code {proc.ExitCode}) but the driver is not visible yet. A reboot may be needed.";
+                    icon = ToolTipIcon.Warning;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("Driver install failed: " + ex);
+                message = "Driver install failed: " + ex.Message;
+                icon = ToolTipIcon.Error;
+            }
+
+            _ui.Post(_ =>
+            {
+                _installingDriver = false;
+                _tray.ShowBalloonTip(5000, "Monitor Anchor", message, icon);
+                RefreshMenu();
+                if (_settings.VirtualStandIns && _standIns.DriverPresent) ScheduleApply("driver installed");
+            }, null);
+        });
+    }
+
     private void ToggleStartup()
     {
         try
@@ -254,10 +381,15 @@ public sealed class TrayApp : ApplicationContext
         _applyItem.Enabled = hasProfile;
         _enforceItem.Checked = _settings.Enforce;
         _keepAwakeItem.Checked = _settings.KeepAwake;
+        _standInItem.Checked = _settings.VirtualStandIns;
+        bool driver = _standIns.DriverPresent;
+        _installDriverItem.Text = driver ? "Parsec virtual display driver: installed" : "Install Parsec virtual display driver...";
+        _installDriverItem.Enabled = !driver && !_installingDriver;
         _startupItem.Checked = Startup.IsEnabled();
 
         string state = !hasProfile ? "no layout saved"
-                     : _settings.Enforce ? $"enforcing {_profile!.Monitors.Count} monitor(s)"
+                     : _settings.Enforce ? $"enforcing {_profile!.Monitors.Count} monitor(s)" +
+                                           (_standIns.ActiveStandIns > 0 ? $", {_standIns.ActiveStandIns} fake" : "")
                      : "paused";
         _tray.Text = Truncate($"Monitor Anchor - {state}", 63); // NotifyIcon.Text is limited to 63 chars
     }
@@ -307,6 +439,7 @@ public sealed class TrayApp : ApplicationContext
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _debounce.Dispose();
+        _standIns.Dispose(); // retires any fake monitors
         Native.SetThreadExecutionState(Native.ES_CONTINUOUS); // release the keep-awake hold
         _tray.Visible = false;
         _tray.Dispose();

@@ -11,6 +11,12 @@ public sealed class AppSettings
     /// <summary>When true, the display and system idle timers are held so the screens never sleep.</summary>
     public bool KeepAwake { get; set; } = true;
 
+    /// <summary>
+    /// When true, a virtual monitor (Parsec Virtual Display Driver) stands in for each saved monitor that is
+    /// unplugged, so windows keep their places. Off by default because it needs the driver installed.
+    /// </summary>
+    public bool VirtualStandIns { get; set; } = false;
+
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
     public static string Path => System.IO.Path.Combine(DisplayProfile.ConfigDir, "settings.json");
 

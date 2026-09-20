@@ -66,6 +66,14 @@ public static class DisplayManager
         return profile;
     }
 
+    /// <summary>What gets saved: the active layout minus any virtual stand-in monitors.</summary>
+    public static DisplayProfile CaptureForProfile()
+    {
+        var profile = Capture();
+        profile.Monitors.RemoveAll(m => ParsecVdd.IsVirtualMonitorId(m.MonitorId));
+        return profile;
+    }
+
     /// <summary>Like <see cref="Capture"/> plus monitors that are physically connected but not part of the desktop (IsActive = false).</summary>
     public static DisplayProfile CaptureAll()
     {
@@ -105,6 +113,7 @@ public static class DisplayManager
         var pending = new List<(MonitorSettings Live, MonitorSettings Want)>();
         foreach (var live in current.Monitors.Where(m => m.IsActive))
         {
+            if (ParsecVdd.IsVirtualMonitorId(live.MonitorId)) continue; // stand-ins are handled by StandInManager
             var want = saved.FindFor(live);
             if (want == null) { unmatched++; Log.Write($"No saved settings for {live}"); continue; }
             if (want.SameModeAs(live)) continue;
@@ -113,34 +122,8 @@ public static class DisplayManager
 
         if (pending.Count > 0)
         {
-            // Set the primary first: CDS_SET_PRIMARY must land before other monitors are positioned relative to it.
-            foreach (var (live, want) in pending.OrderBy(p => p.Want.IsPrimary ? 0 : 1))
-            {
-                var dm = Native.DEVMODE.Create();
-                dm.dmFields = Native.DM_PELSWIDTH | Native.DM_PELSHEIGHT | Native.DM_DISPLAYFREQUENCY |
-                              Native.DM_BITSPERPEL | Native.DM_POSITION | Native.DM_DISPLAYORIENTATION;
-                dm.dmPelsWidth = (uint)want.Width;
-                dm.dmPelsHeight = (uint)want.Height;
-                dm.dmDisplayFrequency = (uint)want.RefreshRate;
-                dm.dmBitsPerPel = (uint)want.BitsPerPixel;
-                dm.dmPositionX = want.IsPrimary ? 0 : want.PositionX;
-                dm.dmPositionY = want.IsPrimary ? 0 : want.PositionY;
-                dm.dmDisplayOrientation = (uint)want.Orientation;
-
-                uint flags = Native.CDS_UPDATEREGISTRY | Native.CDS_NORESET;
-                if (want.IsPrimary) flags |= Native.CDS_SET_PRIMARY;
-
-                int rc = Native.ChangeDisplaySettingsEx(live.AdapterName, ref dm, IntPtr.Zero, flags, IntPtr.Zero);
-                string line = $"{live.MonitorName} ({live.AdapterName}): {live.Width}x{live.Height}@{live.RefreshRate} -> " +
-                              $"{want.Width}x{want.Height}@{want.RefreshRate} pos({want.PositionX},{want.PositionY}) : {Native.DescribeDispChange(rc)}";
-                Log.Write(line);
-                lines.Add(line);
-                if (rc == Native.DISP_CHANGE_SUCCESSFUL) changed++; else failed++;
-            }
-
-            int commit = Native.ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
-            Log.Write($"Commit: {Native.DescribeDispChange(commit)}");
-            if (commit != Native.DISP_CHANGE_SUCCESSFUL) { failed++; changed = 0; }
+            var (c, f, pushLines) = PushModes(pending);
+            changed += c; failed += f; lines.AddRange(pushLines);
         }
 
         // HDR: adapter names and targets can shift after a topology change, so re-read before reconciling.
@@ -162,5 +145,56 @@ public static class DisplayManager
 
         string summary = $"{changed} change(s) applied, {failed} failed." + Environment.NewLine + string.Join(Environment.NewLine, lines);
         return new ApplyResult(changed, failed, unmatched, summary);
+    }
+
+    /// <summary>
+    /// Stages the wanted mode on each live adapter with CDS_NORESET (primary first, so other positions are
+    /// relative to it) and commits once. If a driver rejects the exact refresh rate, retries without it.
+    /// </summary>
+    internal static (int Changed, int Failed, List<string> Lines) PushModes(
+        List<(MonitorSettings Live, MonitorSettings Want)> pending, string labelPrefix = "")
+    {
+        int changed = 0, failed = 0;
+        var lines = new List<string>();
+        if (pending.Count == 0) return (0, 0, lines);
+
+        foreach (var (live, want) in pending.OrderBy(p => p.Want.IsPrimary ? 0 : 1))
+        {
+            int rc = Stage(live.AdapterName, want, includeRefresh: true);
+            string note = "";
+            if (rc == Native.DISP_CHANGE_BADMODE && want.RefreshRate > 0)
+            {
+                rc = Stage(live.AdapterName, want, includeRefresh: false);
+                note = " (refresh rate not available, kept resolution/position)";
+            }
+            string line = $"{labelPrefix}{want.MonitorName} ({live.AdapterName}): {live.Width}x{live.Height}@{live.RefreshRate} -> " +
+                          $"{want.Width}x{want.Height}@{want.RefreshRate} pos({want.PositionX},{want.PositionY}) : {Native.DescribeDispChange(rc)}{note}";
+            Log.Write(line);
+            lines.Add(line);
+            if (rc == Native.DISP_CHANGE_SUCCESSFUL) changed++; else failed++;
+        }
+
+        int commit = Native.ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
+        Log.Write($"Commit: {Native.DescribeDispChange(commit)}");
+        if (commit != Native.DISP_CHANGE_SUCCESSFUL) { failed++; changed = 0; }
+        return (changed, failed, lines);
+    }
+
+    private static int Stage(string adapterName, MonitorSettings want, bool includeRefresh)
+    {
+        var dm = Native.DEVMODE.Create();
+        dm.dmFields = Native.DM_PELSWIDTH | Native.DM_PELSHEIGHT | Native.DM_BITSPERPEL | Native.DM_POSITION | Native.DM_DISPLAYORIENTATION;
+        if (includeRefresh) dm.dmFields |= Native.DM_DISPLAYFREQUENCY;
+        dm.dmPelsWidth = (uint)want.Width;
+        dm.dmPelsHeight = (uint)want.Height;
+        dm.dmDisplayFrequency = (uint)want.RefreshRate;
+        dm.dmBitsPerPel = (uint)want.BitsPerPixel;
+        dm.dmPositionX = want.IsPrimary ? 0 : want.PositionX;
+        dm.dmPositionY = want.IsPrimary ? 0 : want.PositionY;
+        dm.dmDisplayOrientation = (uint)want.Orientation;
+
+        uint flags = Native.CDS_UPDATEREGISTRY | Native.CDS_NORESET;
+        if (want.IsPrimary) flags |= Native.CDS_SET_PRIMARY;
+        return Native.ChangeDisplaySettingsEx(adapterName, ref dm, IntPtr.Zero, flags, IntPtr.Zero);
     }
 }

@@ -33,6 +33,8 @@ Right-click the tray icon (a small monitor with a white dot):
 | Show saved layout... | View what is saved and where the file lives. |
 | Enforce layout on display changes | Toggle automatic restore. Off = the app just sits there. |
 | Keep displays awake (never sleep) | Hold the display and system idle timers so the screens never turn off. On by default. |
+| Fake monitors when real ones unplug | Optional. When a saved monitor is unplugged, a virtual monitor takes its place at the same resolution and position so your windows stay put. Off by default; needs the Parsec Virtual Display Driver. |
+| Install Parsec virtual display driver... | Downloads the signed Parsec driver installer and runs it silently (Windows asks for administrator approval). Shows "installed" once the driver is present. |
 | Start with Windows | Toggle the Run-key registration (on by default after first launch). |
 | Open log | Opens the activity log in your text editor. |
 | Exit | Quit (releases the keep-awake hold). |
@@ -73,5 +75,13 @@ Data folder: `%LOCALAPPDATA%\MonitorAnchor\` (`profile.json`, `settings.json`, `
   ignored until they come back.
 * Keep-awake uses `SetThreadExecutionState` with the display and system "required" flags for as long
   as the app runs.
+* Fake monitors use the [Parsec Virtual Display Driver](https://github.com/nomi-san/parsec-vdd), a
+  signed indirect-display driver that creates up to eight virtual monitors on request. Each pass
+  compares the saved monitors against what is physically connected; for every saved monitor that is
+  missing, one virtual display is plugged in and given that monitor's resolution, refresh rate,
+  position and primary flag. When the real monitor comes back, its stand-in is unplugged first so the
+  real one can take its spot. Virtual monitors are never written into the saved profile. The driver
+  needs a keep-alive ping under 100 ms, which the app sends on a background thread while it runs;
+  exiting the app retires the fake monitors.
 
 Not covered: DPI scaling, colour depth other than what was saved, and clone/duplicate topologies.

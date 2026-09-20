@@ -34,7 +34,7 @@ internal static class Program
         // Scriptable equivalents of the tray menu items.
         if (args.Any(a => string.Equals(a, "--persist", StringComparison.OrdinalIgnoreCase)))
         {
-            var captured = DisplayManager.Capture();
+            var captured = DisplayManager.CaptureForProfile();
             captured.Save();
             Log.Write("Persisted layout (command line):" + Environment.NewLine + captured);
             return;
