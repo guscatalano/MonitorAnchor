@@ -3,3 +3,8 @@ obj/
 publish/
 *.user
 .vs/
+*.pfx
+cert.pfx
+out/
+dist/
+winget/

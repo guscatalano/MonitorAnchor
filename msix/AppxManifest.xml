@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap5 desktop rescap">
+
+  <!-- Publisher must match the subject of the signing certificate exactly. Version is filled in by the build. -->
+  <Identity Name="GusCatalano.MonitorAnchor" Publisher="CN=Gus Catalano" Version="__VERSION__" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Monitor Anchor</DisplayName>
+    <PublisherDisplayName>Gus Catalano</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>Keeps your monitor layout the way you set it: resolution, refresh rate, position, orientation, scaling and HDR.</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="MonitorAnchor" Executable="MonitorAnchor.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Monitor Anchor"
+                          Description="Keeps your monitor layout the way you set it."
+                          BackgroundColor="transparent"
+                          Square150x150Logo="Assets\Square150x150Logo.png"
+                          Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- Start with Windows. Users can turn it off under Settings > Apps > Startup or in Task Manager. -->
+        <desktop:Extension Category="windows.startupTask" Executable="MonitorAnchor.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="MonitorAnchorStartup" Enabled="true" DisplayName="Monitor Anchor" />
+        </desktop:Extension>
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="MonitorAnchor.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="MonitorAnchor.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

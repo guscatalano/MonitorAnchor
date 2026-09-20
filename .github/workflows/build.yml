@@ -1,0 +1,163 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Work out the version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF.Substring(11)
+          } else {
+            $v = ([xml](Get-Content MonitorAnchor.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+            $v = "$v-ci.$env:GITHUB_RUN_NUMBER"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "numeric=$(($v -split '-')[0])" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $v"
+
+      - name: Build
+        run: dotnet build -c Release -p:Version=${{ steps.ver.outputs.numeric }}
+
+      - name: Publish (framework-dependent)
+        run: dotnet publish -c Release -o out/fd -p:Version=${{ steps.ver.outputs.numeric }}
+
+      - name: Publish (self-contained)
+        run: dotnet publish -c Release -o out/sc -p:Version=${{ steps.ver.outputs.numeric }} -p:SelfContained=true -p:EnableCompressionInSingleFile=true
+
+      - name: Publish (MSIX payload)
+        run: dotnet publish -c Release -o out/msix -p:Version=${{ steps.ver.outputs.numeric }} -p:SelfContained=true -p:PublishSingleFile=false -p:IncludeNativeLibrariesForSelfExtract=false
+
+      - name: Stage release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item out/fd/MonitorAnchor.exe dist/MonitorAnchor.exe
+          Copy-Item out/sc/MonitorAnchor.exe dist/MonitorAnchor-selfcontained.exe
+
+      - name: Build MSIX
+        shell: pwsh
+        env:
+          MSIX_CERT_PFX_BASE64: ${{ secrets.MSIX_CERT_PFX_BASE64 }}
+          MSIX_CERT_PASSWORD: ${{ secrets.MSIX_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Directory | Where-Object Name -like '10.*' | Sort-Object Name -Descending | Select-Object -First 1
+          $tools = Join-Path $sdk.FullName 'x64'
+          $makeappx = Join-Path $tools 'makeappx.exe'
+          $signtool = Join-Path $tools 'signtool.exe'
+
+          $ver = '${{ steps.ver.outputs.numeric }}'
+          $manifest = (Get-Content msix/AppxManifest.xml -Raw).Replace('__VERSION__', "$ver.0")
+          Set-Content out/msix/AppxManifest.xml $manifest -Encoding UTF8
+          Copy-Item -Recurse msix/Assets out/msix/Assets
+          & $makeappx pack /o /d out/msix /p dist/MonitorAnchor.msix
+
+          if ($env:MSIX_CERT_PFX_BASE64) {
+            [IO.File]::WriteAllBytes('cert.pfx', [Convert]::FromBase64String($env:MSIX_CERT_PFX_BASE64))
+            & $signtool sign /fd SHA256 /f cert.pfx /p $env:MSIX_CERT_PASSWORD /tr http://timestamp.digicert.com /td SHA256 dist/MonitorAnchor.msix
+            Remove-Item cert.pfx
+            Copy-Item msix/MonitorAnchor.cer dist/MonitorAnchor.cer
+            Write-Host 'MSIX signed with the repository certificate'
+          } else {
+            Write-Host '::warning::No MSIX_CERT_PFX_BASE64 secret; the MSIX is unsigned and will not install'
+          }
+
+      - name: Checksums and winget manifests
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.numeric }}'
+          $sums = Get-ChildItem dist -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name }
+          Set-Content dist/SHA256SUMS.txt $sums
+          $exeHash = (Get-FileHash dist/MonitorAnchor-selfcontained.exe -Algorithm SHA256).Hash
+          New-Item -ItemType Directory -Force "winget/GusCatalano.MonitorAnchor/$ver" | Out-Null
+          $base = "https://github.com/${{ github.repository }}/releases/download/v$ver"
+          @"
+          PackageIdentifier: GusCatalano.MonitorAnchor
+          PackageVersion: $ver
+          DefaultLocale: en-US
+          ManifestType: version
+          ManifestVersion: 1.6.0
+          "@ | Set-Content "winget/GusCatalano.MonitorAnchor/$ver/GusCatalano.MonitorAnchor.yaml"
+          @"
+          PackageIdentifier: GusCatalano.MonitorAnchor
+          PackageVersion: $ver
+          InstallerType: portable
+          Commands:
+            - MonitorAnchor
+          Installers:
+            - Architecture: x64
+              InstallerUrl: $base/MonitorAnchor-selfcontained.exe
+              InstallerSha256: $exeHash
+          ManifestType: installer
+          ManifestVersion: 1.6.0
+          "@ | Set-Content "winget/GusCatalano.MonitorAnchor/$ver/GusCatalano.MonitorAnchor.installer.yaml"
+          @"
+          PackageIdentifier: GusCatalano.MonitorAnchor
+          PackageVersion: $ver
+          PackageLocale: en-US
+          Publisher: Gus Catalano
+          PublisherUrl: https://guscatalano.dev/
+          PackageName: Monitor Anchor
+          PackageUrl: https://github.com/${{ github.repository }}
+          License: MIT
+          ShortDescription: Keeps your Windows monitor layout (resolution, refresh rate, position, scaling, HDR) the way you set it.
+          Tags:
+            - display
+            - monitor
+            - kvm
+            - tray
+          ManifestType: defaultLocale
+          ManifestVersion: 1.6.0
+          "@ | Set-Content "winget/GusCatalano.MonitorAnchor/$ver/GusCatalano.MonitorAnchor.locale.en-US.yaml"
+          Compress-Archive -Path "winget/GusCatalano.MonitorAnchor" -DestinationPath dist/winget-manifests.zip -Force
+          Get-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MonitorAnchor-${{ steps.ver.outputs.version }}
+          path: dist/*
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = '${{ steps.ver.outputs.numeric }}'
+          $notes = @"
+          $(git tag -l --format='%(contents:body)' v$ver)
+
+          **Downloads**
+          - ``MonitorAnchor.exe``: small build, requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
+          - ``MonitorAnchor-selfcontained.exe``: runtime bundled, runs anywhere on Windows 10/11 x64.
+          - ``MonitorAnchor.msix``: packaged install (Start Menu, clean uninstall). Signed with the project's self-signed certificate; install ``MonitorAnchor.cer`` into *Trusted People* (Local Machine) once, then double-click the MSIX.
+          - ``winget-manifests.zip``: manifests for submitting this version to winget.
+          - ``SHA256SUMS.txt``: checksums of everything above.
+
+          Installs of 1.2.0 or later pick this up automatically.
+          "@
+          gh release create "v$ver" (Get-ChildItem dist -File | ForEach-Object { $_.FullName }) --title "Monitor Anchor $ver" --notes $notes

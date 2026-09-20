@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/guscatalano/MonitorAnchor/releases/latest"><img src="https://img.shields.io/github/v/release/guscatalano/MonitorAnchor?label=download" alt="Latest release"></a>
+  <a href="https://github.com/guscatalano/MonitorAnchor/actions/workflows/build.yml"><img src="https://github.com/guscatalano/MonitorAnchor/actions/workflows/build.yml/badge.svg" alt="Build"></a>
 </p>
 
 ---
@@ -30,10 +31,17 @@ Download from the [latest release](https://github.com/guscatalano/MonitorAnchor/
 | --- | --- |
 | `MonitorAnchor.exe` | Small build. Needs the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). |
 | `MonitorAnchor-selfcontained.exe` | Runtime bundled. Runs anywhere on Windows 10/11 x64. |
+| `MonitorAnchor.msix` | Packaged install with Start Menu entry and clean uninstall. Signed with the project's own certificate (`MonitorAnchor.cer`, also in `msix/`): install that certificate once into **Trusted People** on the Local Machine, then double-click the MSIX. Startup is managed by Windows (Settings > Apps > Startup) and updates go through App Installer. |
+| `winget-manifests.zip` | Manifests for this version, ready to submit to [winget-pkgs](https://github.com/microsoft/winget-pkgs). |
+| `SHA256SUMS.txt` | Checksums of all of the above. |
 
-Put the exe wherever you want it to live and run it once. It registers itself to start with Windows, learns the layout
-you have right now, and from then on keeps it. Rearrange your monitors and choose **Persist current layout** any time
-to update the saved layout. Updates install themselves (see below).
+Run the exe once. If it is in Downloads, on the desktop or in a temp folder it offers to install itself into your
+Programs folder (Start Menu shortcut, starts with Windows). It learns the layout you have right now and from then on
+keeps it. Rearrange your monitors and choose **Persist current layout** any time to update or add a layout. Updates
+install themselves (see below).
+
+Every release is built by [GitHub Actions](.github/workflows/build.yml) from the tagged commit: both exes, the MSIX,
+the winget manifests and the checksums come out of the same run.
 
 ## What it does
 
@@ -190,8 +198,15 @@ dotnet publish -c Release -o publish                                   # framewo
 dotnet publish -c Release -o publish-sc -p:SelfContained=true          # runtime bundled
 ```
 
-`tools/make-icon.cs` regenerates `assets/icon.ico` and `icon.png` (run it from inside `tools/`), and
-`MonitorAnchor.exe --screenshots assets` re-renders the README screenshots.
+`tools/make-icon.cs` regenerates `assets/icon.ico`, `icon.png` and the MSIX tile images (run it from inside
+`tools/`), and `MonitorAnchor.exe --screenshots assets` re-renders the README screenshots.
+
+### Releasing
+
+Push a tag `vX.Y.Z` and the workflow does the rest: it builds with that version, packs and signs the MSIX using the
+`MSIX_CERT_PFX_BASE64` / `MSIX_CERT_PASSWORD` repository secrets, writes winget manifests and checksums, and creates
+the GitHub release with the tag's message as notes. Running apps pick the release up through their own update check.
+The MSIX `Publisher` in `msix/AppxManifest.xml` must match the certificate subject (`CN=Gus Catalano`).
 
 ## How it works, in detail
 

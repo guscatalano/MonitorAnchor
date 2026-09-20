@@ -26,6 +26,24 @@ foreach (int size in sizes)
 WriteIco(Path.Combine(assets, "icon.ico"), pngs);
 Console.WriteLine($"wrote {Path.Combine(assets, "icon.ico")} and icon.png");
 
+// MSIX tile assets: square logos are the icon itself; the wide tile centres it.
+string msixAssets = Path.Combine(root, "msix", "Assets");
+Directory.CreateDirectory(msixAssets);
+foreach (var (name, size) in new[] { ("Square44x44Logo.png", 44), ("Square150x150Logo.png", 150), ("StoreLogo.png", 50), ("Square44x44Logo.targetsize-44_altform-unplated.png", 44) })
+{
+    using var bmp = Render(size);
+    bmp.Save(Path.Combine(msixAssets, name), ImageFormat.Png);
+}
+using (var wide = new Bitmap(310, 150, PixelFormat.Format32bppArgb))
+using (var g = Graphics.FromImage(wide))
+using (var glyph = Render(120))
+{
+    g.Clear(Color.Transparent);
+    g.DrawImage(glyph, (310 - 120) / 2, (150 - 120) / 2, 120, 120);
+    wide.Save(Path.Combine(msixAssets, "Wide310x150Logo.png"), ImageFormat.Png);
+}
+Console.WriteLine($"wrote MSIX assets to {msixAssets}");
+
 static Bitmap Render(int s)
 {
     var bmp = new Bitmap(s, s, PixelFormat.Format32bppArgb);

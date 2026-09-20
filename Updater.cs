@@ -12,11 +12,13 @@ public static class Updater
     public const string RepoUrl = "https://github.com/guscatalano/MonitorAnchor";
     private const string LatestApi = "https://api.github.com/repos/guscatalano/MonitorAnchor/releases/latest";
 
-    /// <summary>Asset that matches how this build was published (set by the csproj).</summary>
+    /// <summary>Release asset that matches how this build was published: MSIX when packaged, else the exe flavour set by the csproj.</summary>
+    public static string AssetName => Packaged.IsPackaged ? "MonitorAnchor.msix" : ExeAssetName;
+
 #if SELF_CONTAINED
-    public const string AssetName = "MonitorAnchor-selfcontained.exe";
+    private const string ExeAssetName = "MonitorAnchor-selfcontained.exe";
 #else
-    public const string AssetName = "MonitorAnchor.exe";
+    private const string ExeAssetName = "MonitorAnchor.exe";
 #endif
 
     public static Version Current
@@ -63,7 +65,7 @@ public static class Updater
     {
         string dir = Path.Combine(DisplayProfile.ConfigDir, "update");
         Directory.CreateDirectory(dir);
-        string path = Path.Combine(dir, $"MonitorAnchor-{release.Version}.exe");
+        string path = Path.Combine(dir, $"MonitorAnchor-{release.Version}{Path.GetExtension(AssetName)}");
 
         using (var http = NewClient())
         {
@@ -91,6 +93,13 @@ public static class Updater
     /// </summary>
     public static bool SwapAndRestart(string newExe)
     {
+        if (Packaged.IsPackaged)
+        {
+            // The package folder is read-only; hand the new MSIX to App Installer, which upgrades in place.
+            Process.Start(new ProcessStartInfo(newExe) { UseShellExecute = true });
+            Log.Write($"Update downloaded to {newExe}; App Installer opened to apply it");
+            return false;
+        }
         string current = Environment.ProcessPath ?? throw new InvalidOperationException("cannot determine own path");
         string parked = current + ".old";
 

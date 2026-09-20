@@ -585,6 +585,11 @@ public sealed class TrayApp : ApplicationContext
 
     private void ToggleStartup()
     {
+        if (Startup.ManagedByWindows)
+        {
+            Startup.OpenWindowsStartupSettings(); // packaged: the StartupTask is toggled in Settings > Apps > Startup
+            return;
+        }
         try
         {
             if (Startup.IsEnabled()) Startup.Disable(); else Startup.Enable();
@@ -640,6 +645,8 @@ public sealed class TrayApp : ApplicationContext
         _checkUpdatesItem.Text = _checkingUpdates ? "Checking for updates..." : "Check for updates now";
         _installItem.Text = Installer.IsInstalled ? "Uninstall..." : "Install to Programs folder...";
         _startupItem.Checked = Startup.IsEnabled();
+        _startupItem.Text = Startup.ManagedByWindows ? "Start with Windows (managed in Settings > Apps > Startup)..." : "Start with Windows";
+        _installItem.Visible = !Packaged.IsPackaged;
 
         string state = _store.Layouts.Count == 0 ? "no layout saved"
                      : !hasProfile ? "no layout for these monitors"
@@ -740,7 +747,7 @@ public sealed class TrayApp : ApplicationContext
     /// <summary>First run from Downloads, the desktop or a temp folder: offer a permanent home once.</summary>
     private void OfferInstall()
     {
-        if (ScreenshotMode || _settings.InstallOfferAnswered || !Installer.LooksTemporary) return;
+        if (ScreenshotMode || Packaged.IsPackaged || _settings.InstallOfferAnswered || !Installer.LooksTemporary) return;
         _settings.InstallOfferAnswered = true;
         _settings.Save();
         var answer = MessageBox.Show(

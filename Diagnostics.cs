@@ -13,6 +13,7 @@ public static class Diagnostics
         var text = new StringBuilder();
         text.AppendLine($"Monitor Anchor {Updater.Current} ({Updater.AssetName})  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         text.AppendLine($"Data folder: {DisplayProfile.ConfigDir}");
+        text.AppendLine($"Running from: {Environment.ProcessPath}{(Packaged.IsPackaged ? "  (MSIX package)" : Installer.IsInstalled ? "  (installed)" : "")}");
         text.AppendLine();
 
         text.AppendLine($"SAVED LAYOUTS ({store.Layouts.Count})");
