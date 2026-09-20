@@ -183,7 +183,6 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(_keepAwakeItem);
         menu.Items.Add(idleMenu);
         menu.Items.Add(fakeMenu);
-        menu.Items.Add(_wuMenu);
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_showItem);
@@ -196,6 +195,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(_autoUpdateItem);
         menu.Items.Add(_checkUpdatesItem);
         menu.Items.Add(_installItem);
+        menu.Items.Add(_wuMenu);
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));

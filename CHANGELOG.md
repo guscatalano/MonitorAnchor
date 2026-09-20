@@ -3,6 +3,11 @@
 All notable changes to Monitor Anchor. The release workflow uses the section for the tagged version as the
 release notes, so keep the heading format `## X.Y.Z - YYYY-MM-DD`.
 
+## 2.6.1 - 2026-09-20
+
+**Changed**
+- The Windows Update submenu moved from the display behaviours to the app group at the bottom of the menu.
+
 ## 2.6.0 - 2026-09-20
 
 **Changed**
