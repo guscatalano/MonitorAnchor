@@ -109,6 +109,7 @@ that reconnects. Monitor Anchor keeps the monitor identities and layout stable s
 | Item | What it does |
 | --- | --- |
 | Show saved layout... | What is saved and where the file lives. |
+| Show warnings... | Every current concern in one window, each with what to do: HDMI links running in the high-speed mode that KVMs and cables struggle with (pixel clock × bit depth above 340 MHz), links beyond HDMI 2.0, fractional refresh timings, GPU drivers older than 18 months, links that have retrained, no matching layout, enforcement off, a paused apply, fake monitors without the driver, an update waiting, or startup not registered. The menu label shows the count. |
 | Show diagnostics... | Everything the app can see, in one window (below). |
 | Show log... | Live log viewer: tails the file and auto-scrolls as entries arrive. Scroll up to pause following, Ctrl+End to resume. Always-on-top checkbox, plus buttons to reload, copy, open in your editor, or clear the file. |
 

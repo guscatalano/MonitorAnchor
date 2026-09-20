@@ -3,6 +3,16 @@
 All notable changes to Monitor Anchor. The release workflow uses the section for the tagged version as the
 release notes, so keep the heading format `## X.Y.Z - YYYY-MM-DD`.
 
+## 2.5.0 - 2026-09-20
+
+**New**
+- **Link health warnings.** HDMI links are judged by their effective rate (pixel clock × bit depth): above
+  340 MHz the link runs in HDMI's high-speed mode, which KVMs and cables handle worst; above 600 MHz it needs
+  HDMI 2.1 signalling. Each warning says what to change (HDR off for 8-bit colour, a lower refresh rate or a
+  reduced-blanking timing). Fractional refresh timings and GPU drivers older than 18 months are flagged too.
+  Shown in diagnostics, logged at startup with a tray notice, and raised again when a link actually retrains.
+- **Show warnings...** in the tray menu lists every current concern with its remedy; the label carries the count.
+
 ## 2.4.1 - 2026-09-20
 
 **Fixed**

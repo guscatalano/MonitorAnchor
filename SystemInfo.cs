@@ -68,7 +68,7 @@ public static class SystemInfo
         sb.Append("  ").AppendLine(LinkInfo.OsBuild());
         sb.Append("  ").AppendLine(Uptime());
         sb.Append("  ").AppendLine(PowerTimeouts());
-        foreach (var a in LinkInfo.Adapters()) sb.Append("  ").AppendLine(a);
+        foreach (var a in LinkInfo.Adapters()) sb.Append("  ").AppendLine(a.ToString());
         foreach (var l in LinkInfo.Query()) sb.Append("  ").AppendLine(l.ToString());
         return sb.ToString().TrimEnd();
     }

@@ -18,7 +18,7 @@
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>2.4.1</Version>
+    <Version>2.5.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -21,6 +21,9 @@ public sealed class TrayApp : ApplicationContext
     /// <summary>Set by --screenshots: build the UI without registering startup, learning a layout or enforcing anything.</summary>
     public static bool ScreenshotMode;
     private readonly ToolStripMenuItem _diagnosticsItem;
+    private readonly ToolStripMenuItem _warningsItem;
+    private WarningsForm? _warnings;
+    private Updater.Release? _pendingUpdate;
     private DiagnosticsForm? _diagnostics;
     private readonly ToolStripMenuItem _enforceItem;
     private readonly ToolStripMenuItem _startupItem;
@@ -100,6 +103,7 @@ public sealed class TrayApp : ApplicationContext
         _applyItem = new ToolStripMenuItem("Apply saved layout now", null, (_, _) => ApplyNow(manual: true));
         _showItem = new ToolStripMenuItem("Show saved layout...", null, (_, _) => ShowSaved());
         _diagnosticsItem = new ToolStripMenuItem("Show diagnostics...", null, (_, _) => ShowDiagnostics());
+        _warningsItem = new ToolStripMenuItem("Show warnings...", null, (_, _) => ShowWarnings());
         _enforceItem = new ToolStripMenuItem("Enforce layout on display changes", null, (_, _) => ToggleEnforce()) { CheckOnClick = false };
         _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup()) { CheckOnClick = false };
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
@@ -175,6 +179,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(_showItem);
+        menu.Items.Add(_warningsItem);
         menu.Items.Add(_diagnosticsItem);
         menu.Items.Add(new ToolStripMenuItem("Show log...", null, (_, _) => OpenLog()));
         menu.Items.Add(new ToolStripSeparator());
@@ -186,7 +191,7 @@ public sealed class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
 
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
-        menu.Opening += (_, _) => RefreshMenu();
+        menu.Opening += (_, _) => { try { CollectWarnings(); } catch { /* count stays stale */ } RefreshMenu(); };
 
         _tray = new NotifyIcon
         {
@@ -256,6 +261,23 @@ public sealed class TrayApp : ApplicationContext
         ApplyKeepAwake();
         WindowSnapshot.LogNow("startup");
         Log.Write("System:" + Environment.NewLine + SystemInfo.Describe());
+        var health = LinkInfo.CurrentWarnings();
+        CollectWarnings(); // seeds the count shown in the menu
+        if (health.Count > 0)
+        {
+            Log.Write("Link health:" + string.Concat(health.Select(h => Environment.NewLine + "  ! " + h)));
+            if (!ScreenshotMode)
+                _tray.ShowBalloonTip(8000, "Display link warning", health[0].Length > 250 ? health[0][..250] + "…" : health[0], ToolTipIcon.Warning);
+        }
+        _kvm.Detected += (kind, detail) =>
+        {
+            if (kind != "Display link retrained") return;
+            var advice = LinkInfo.CurrentWarnings();
+            _tray.ShowBalloonTip(8000, "Display link retrained",
+                advice.Count > 0 ? "The link dropped and came back. Likely cause: " + (advice[0].Length > 200 ? advice[0][..200] + "…" : advice[0])
+                                 : "The link dropped and came back. See diagnostics for the link details.",
+                ToolTipIcon.Warning);
+        };
         // The offer must run inside the message loop, not here in the constructor: accepting it exits the app,
         // and an ExitThread before Application.Run has started is silently lost, leaving a ghost instance that
         // holds the single-instance lock while the installed copy waits for it and gives up.
@@ -499,6 +521,52 @@ public sealed class TrayApp : ApplicationContext
         }
     }
 
+    private int? _cachedWarningCount;
+
+    /// <summary>Every current concern, worded with what to do. Link health is queried live; the rest is app state.</summary>
+    private List<string> CollectWarnings()
+    {
+        var list = new List<string>();
+        try { list.AddRange(LinkInfo.CurrentWarnings()); }
+        catch (Exception ex) { list.Add("Link health could not be checked: " + ex.Message); }
+
+        if (_state.LinkRetrains > 0)
+            list.Add($"A display link has retrained {_state.LinkRetrains} time(s), last at {_state.LastLinkRetrain:g}. That is a flicker or blank seen from Windows' side; the link warnings above are the usual cause. The count is in the log and diagnostics.");
+
+        if (_store.Layouts.Count == 0)
+            list.Add("No layout is saved yet, so nothing is being enforced. Arrange the monitors and choose \"Persist current layout\".");
+        else if (_profile == null)
+            list.Add("No saved layout matches the monitors connected right now, so nothing is being enforced for this set. Arrange them and choose \"Persist current layout\" to add one.");
+        if (!_settings.Enforce)
+            list.Add("Enforcement is switched off (\"Enforce layout on display changes\"), so the saved layout will not be restored.");
+        if (DateTime.Now < _backoffUntil)
+            list.Add($"Automatic apply is paused until {_backoffUntil:T} after three failures in a row; see the log for the driver's rejection.");
+        if (_settings.VirtualStandIns && !_standIns.DriverPresent)
+            list.Add("Fake monitors are enabled but the Parsec Virtual Display Driver is not installed, so no stand-in can be created. Use Fake monitors > Install.");
+        if (_pendingUpdate != null && _pendingUpdate.Version > Updater.Current)
+            list.Add($"Monitor Anchor {_pendingUpdate.Version} is available and automatic updates are off. Use \"Check for updates now\" to install it.");
+        if (!Startup.IsEnabled())
+            list.Add("The app is not set to start with Windows, so the layout will not be enforced after a reboot until you launch it.");
+
+        _cachedWarningCount = list.Count;
+        return list;
+    }
+
+    private void ShowWarnings()
+    {
+        if (_warnings == null || _warnings.IsDisposed)
+        {
+            _warnings = new WarningsForm(CollectWarnings) { OpenDiagnostics = ShowDiagnostics };
+            _warnings.Show();
+        }
+        else
+        {
+            _warnings.Refresh();
+            if (_warnings.WindowState == FormWindowState.Minimized) _warnings.WindowState = FormWindowState.Normal;
+            _warnings.Activate();
+        }
+    }
+
     private void ShowDiagnostics()
     {
         if (_diagnostics == null || _diagnostics.IsDisposed)
@@ -706,6 +774,9 @@ public sealed class TrayApp : ApplicationContext
         _wuStatusItem.Text = pausedUntil == null ? "Updates are not paused" : $"Paused until {pausedUntil:g}";
         _checkUpdatesItem.Enabled = !_checkingUpdates;
         _checkUpdatesItem.Text = _checkingUpdates ? "Checking for updates..." : "Check for updates now";
+        int warningCount = _cachedWarningCount ?? 0;
+        _warningsItem.Text = warningCount > 0 ? $"Show warnings ({warningCount})..." : "Show warnings...";
+        _warningsItem.Font = warningCount > 0 ? new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold) : null;
         _installItem.Text = Installer.IsInstalled ? "Uninstall..." : "Install to Programs folder...";
         _startupItem.Checked = Startup.IsEnabled();
         _startupItem.Text = Startup.ManagedByWindows ? "Start with Windows (managed in Settings > Apps > Startup)..." : "Start with Windows";
@@ -904,6 +975,7 @@ public sealed class TrayApp : ApplicationContext
                 }
 
                 Log.Write($"Update available: {release.Version} (running {Updater.Current})");
+                _pendingUpdate = release;
                 bool install = _settings.AutoUpdate;
                 if (!install && manual)
                 {

@@ -23,6 +23,12 @@ public static class Diagnostics
         text.AppendLine(SystemInfo.Describe());
         text.AppendLine();
 
+        text.AppendLine("LINK HEALTH");
+        var warnings = LinkInfo.CurrentWarnings();
+        if (warnings.Count == 0) text.AppendLine("  no concerns: every HDMI link is under the high-speed threshold and drivers are recent");
+        foreach (var w in warnings) text.AppendLine("  ! " + w);
+        text.AppendLine();
+
         text.AppendLine($"SAVED LAYOUTS ({store.Layouts.Count})");
         if (store.Layouts.Count == 0) text.AppendLine("  (none)");
         foreach (var l in store.Layouts)

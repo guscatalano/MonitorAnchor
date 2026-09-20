@@ -13,7 +13,9 @@ public static class LinkInfo
     public sealed record Link(string GdiName, string Connector, string ColourFormat, int BitsPerChannel, double RefreshHz, double PixelClockMHz, int Width, int Height, bool HdrOffered)
     {
         public override string ToString() =>
-            $"{GdiName}: {Connector}, {ColourFormat} {(BitsPerChannel > 0 ? BitsPerChannel + " bpc" : "")}, {Width}x{Height} @ {RefreshHz:F3} Hz, pixel clock {PixelClockMHz:F1} MHz{(HdrOffered ? ", HDR offered" : "")}";
+            $"{GdiName}: {Connector}, {ColourFormat} {(BitsPerChannel > 0 ? BitsPerChannel + " bpc" : "")}, {Width}x{Height} @ {RefreshHz:F3} Hz, pixel clock {PixelClockMHz:F1} MHz" +
+            (Connector.StartsWith("HDMI") && PixelClockMHz > 0 ? $" (effective {EffectiveTmdsMHz(PixelClockMHz, ColourFormat, BitsPerChannel):F0} MHz)" : "") +
+            (HdrOffered ? ", HDR offered" : "");
     }
 
     /// <summary>One entry per active adapter output.</summary>
@@ -90,10 +92,15 @@ public static class LinkInfo
         16 => "indirect (wired)", 17 => "indirect (virtual)", 18 => "DisplayPort over USB", 0x80000000 => "internal", _ => $"connector {tech}",
     };
 
-    /// <summary>GPU adapters with driver versions, from the display class registry key (no WMI needed).</summary>
-    public static List<string> Adapters()
+    public sealed record Adapter(string Description, string Version, DateTime? Date)
     {
-        var list = new List<string>();
+        public override string ToString() => $"{Description}, driver {Version}{(Date is { } d ? $" ({d:yyyy-MM-dd})" : "")}";
+    }
+
+    /// <summary>GPU adapters with driver versions, from the display class registry key (no WMI needed).</summary>
+    public static List<Adapter> Adapters()
+    {
+        var list = new List<Adapter>();
         try
         {
             using var cls = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}");
@@ -103,13 +110,70 @@ public static class LinkInfo
                 using var k = cls.OpenSubKey(name);
                 if (k?.GetValue("DriverDesc") is not string desc) continue;
                 string ver = k.GetValue("DriverVersion") as string ?? "?";
-                string date = k.GetValue("DriverDate") as string ?? "";
-                list.Add($"{desc}, driver {ver}{(date.Length > 0 ? $" ({date})" : "")}");
+                DateTime? date = DateTime.TryParseExact(k.GetValue("DriverDate") as string ?? "", "M-d-yyyy",
+                    System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d) ? d : null;
+                list.Add(new Adapter(desc, ver, date));
             }
         }
-        catch (Exception ex) { list.Add("adapter query failed: " + ex.Message); }
+        catch (Exception ex) { list.Add(new Adapter("adapter query failed: " + ex.Message, "?", null)); }
         return list;
     }
+
+    // ---- Link health ---------------------------------------------------------------------------------
+
+    /// <summary>HDMI TMDS character rate above this needs the high-speed (scrambled) mode: fine on a good cable, marginal through switches.</summary>
+    public const double HdmiHighSpeedMHz = 340;
+    /// <summary>Above this HDMI 2.0 is exhausted and the link must use HDMI 2.1 fixed-rate signalling.</summary>
+    public const double Hdmi20LimitMHz = 600;
+    public static readonly TimeSpan OldDriverAge = TimeSpan.FromDays(548); // 18 months
+
+    /// <summary>Effective TMDS rate in MHz: pixel clock scaled by bit depth for RGB/4:4:4, unscaled for 4:2:2, halved for 4:2:0.</summary>
+    internal static double EffectiveTmdsMHz(double pixelClockMHz, string colourFormat, int bpc)
+    {
+        double factor = colourFormat.Contains("4:2:0") ? 0.5
+                      : colourFormat.Contains("4:2:2") ? 1.0
+                      : Math.Max(8, bpc) / 8.0;
+        return pixelClockMHz * factor;
+    }
+
+    /// <summary>Plain-language warnings about links that are likely to flicker, and drivers likely to pick poor timings.</summary>
+    internal static List<string> Warnings(IEnumerable<Link> links, IEnumerable<Adapter> adapters, DateTime? now = null)
+    {
+        var w = new List<string>();
+        var today = now ?? DateTime.Now;
+
+        foreach (var l in links)
+        {
+            if (l.PixelClockMHz <= 0) continue;
+            bool hdmi = l.Connector.StartsWith("HDMI", StringComparison.OrdinalIgnoreCase);
+            if (!hdmi) continue;
+            double tmds = EffectiveTmdsMHz(l.PixelClockMHz, l.ColourFormat, l.BitsPerChannel);
+            if (tmds > Hdmi20LimitMHz)
+                w.Add($"{l.GdiName}: {tmds:F0} MHz effective HDMI rate exceeds HDMI 2.0 ({Hdmi20LimitMHz:F0} MHz); the link must use HDMI 2.1 signalling, " +
+                      "which many KVMs and cables do not carry reliably. Lower the refresh rate, use 8-bit colour, or turn HDR off.");
+            else if (tmds > HdmiHighSpeedMHz)
+            {
+                string why = l.BitsPerChannel > 8 && !l.ColourFormat.Contains("4:2:2")
+                    ? $"{l.BitsPerChannel}-bit colour multiplies the {l.PixelClockMHz:F0} MHz pixel clock by {Math.Max(8, l.BitsPerChannel) / 8.0:F2}"
+                    : $"the {l.PixelClockMHz:F0} MHz pixel clock is above the threshold on its own";
+                w.Add($"{l.GdiName}: {tmds:F0} MHz effective HDMI rate is above {HdmiHighSpeedMHz:F0} MHz, the point where HDMI switches to its high-speed mode " +
+                      $"({why}). That mode is marginal through KVMs and long or cheap cables and shows up as blanking or retraining. " +
+                      (l.BitsPerChannel > 8 ? "Turning HDR off (8-bit colour) brings it back under the line. " : "") +
+                      "A reduced-blanking timing (often what a newer driver picks for 120 Hz) also lowers the pixel clock.");
+            }
+            if (Math.Abs(l.RefreshHz - Math.Round(l.RefreshHz)) > 0.01 && l.RefreshHz > 0)
+                w.Add($"{l.GdiName}: fractional refresh timing ({l.RefreshHz:F3} Hz). Harmless by itself, but if the display or GPU makes noise at this timing, the integer {Math.Round(l.RefreshHz):F0} Hz mode is worth trying.");
+        }
+
+        foreach (var a in adapters)
+        {
+            if (a.Date is { } d && today - d > OldDriverAge && !a.Description.Contains("Virtual", StringComparison.OrdinalIgnoreCase) && !a.Description.Contains("DisplayLink", StringComparison.OrdinalIgnoreCase))
+                w.Add($"{a.Description}: driver dated {d:yyyy-MM-dd} is {(int)((today - d).TotalDays / 30)} months old. Newer drivers fix link handling and often choose lower-clock timings.");
+        }
+        return w;
+    }
+
+    public static List<string> CurrentWarnings() => Warnings(Query(), Adapters());
 
     public static string OsBuild()
     {
@@ -130,7 +194,7 @@ public static class LinkInfo
     {
         var sb = new System.Text.StringBuilder();
         sb.Append("  ").AppendLine(OsBuild());
-        foreach (var a in Adapters()) sb.Append("  ").AppendLine(a);
+        foreach (var a in Adapters()) sb.Append("  ").AppendLine(a.ToString());
         foreach (var l in Query()) sb.Append("  ").AppendLine(l.ToString());
         return sb.ToString().TrimEnd();
     }
