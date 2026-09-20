@@ -18,8 +18,20 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _standInItem;
     private readonly ToolStripMenuItem _installDriverItem;
     private readonly StandInManager _standIns = new();
+    private readonly ToolStripMenuItem _delayMenu;
+    private readonly ToolStripMenuItem _jiggleItem;
+    private readonly Jiggler _jiggler = new();
+    private readonly ToolStripMenuItem _checkUpdatesItem;
+    private readonly ToolStripMenuItem _autoUpdateItem;
+    private readonly System.Windows.Forms.Timer _updateTimer;
     private readonly SynchronizationContext _ui;
     private bool _installingDriver;
+    private bool _checkingUpdates;
+
+    private static readonly (string Label, int Seconds)[] DelayPresets =
+    {
+        ("Immediately", 0), ("After 5 seconds", 5), ("After 15 seconds", 15), ("After 1 minute", 60), ("After 5 minutes", 300),
+    };
     private readonly System.Windows.Forms.Timer _debounce;
     private readonly System.Windows.Forms.Timer _lateSnapshot;
 
@@ -51,17 +63,33 @@ public sealed class TrayApp : ApplicationContext
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
         _standInItem = new ToolStripMenuItem("Fake monitors when real ones unplug", null, (_, _) => ToggleStandIns()) { CheckOnClick = false };
         _installDriverItem = new ToolStripMenuItem("Install Parsec virtual display driver...", null, (_, _) => InstallDriver());
+        _delayMenu = new ToolStripMenuItem("Fake monitor delay");
+        foreach (var (label, seconds) in DelayPresets)
+            _delayMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => SetStandInDelay(seconds)) { Tag = seconds });
+        _checkUpdatesItem = new ToolStripMenuItem("Check for updates now", null, (_, _) => CheckForUpdates(manual: true));
+        _autoUpdateItem = new ToolStripMenuItem("Install updates automatically", null, (_, _) => ToggleAutoUpdate()) { CheckOnClick = false };
+        _standIns.Delay = TimeSpan.FromSeconds(Math.Max(0, _settings.StandInDelaySeconds));
+        _jiggleItem = new ToolStripMenuItem("Jiggle mouse when idle (stay \"active\")", null, (_, _) => ToggleJiggle()) { CheckOnClick = false };
+        _jiggler.IdleThreshold = TimeSpan.FromSeconds(Math.Max(10, _settings.JiggleIdleSeconds));
+        _jiggler.Enabled = _settings.JiggleWhenIdle;
 
         var menu = new ContextMenuStrip();
+        menu.Items.Add(new ToolStripMenuItem($"Monitor Anchor {Updater.Current}") { Enabled = false });
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_persistItem);
         menu.Items.Add(_applyItem);
         menu.Items.Add(_showItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_enforceItem);
         menu.Items.Add(_keepAwakeItem);
+        menu.Items.Add(_jiggleItem);
         menu.Items.Add(_standInItem);
         menu.Items.Add(_installDriverItem);
+        menu.Items.Add(_delayMenu);
         menu.Items.Add(_startupItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_checkUpdatesItem);
+        menu.Items.Add(_autoUpdateItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Open log", null, (_, _) => OpenLog()));
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
@@ -77,6 +105,15 @@ public sealed class TrayApp : ApplicationContext
 
         _debounce = new System.Windows.Forms.Timer { Interval = DebounceMs };
         _debounce.Tick += (_, _) => OnDebounceElapsed();
+
+        // First update check shortly after start (so a broken network does not delay startup), then daily.
+        _updateTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
+        _updateTimer.Tick += (_, _) =>
+        {
+            _updateTimer.Interval = (int)TimeSpan.FromHours(24).TotalMilliseconds;
+            if (_settings.AutoUpdate) CheckForUpdates(manual: false);
+        };
+        _updateTimer.Start();
 
         // Windows' own "remember window locations" restore can land a few seconds after a reconnect.
         _lateSnapshot = new System.Windows.Forms.Timer { Interval = 5000 };
@@ -189,6 +226,8 @@ public sealed class TrayApp : ApplicationContext
                         (result.MadeChanges || result.HadFailures ? result.Summary + Environment.NewLine : "") + standIn.Summary);
                     if (standIn.MadeChanges) ScheduleApply("stand-in changed");
                 }
+                if (_standIns.NextDue is { } due)
+                    ScheduleApply("fake monitor due", (int)Math.Clamp(due.TotalMilliseconds + 250, 1000, int.MaxValue));
             }
 
             Log.Write($"Apply ({(manual ? "manual" : "auto")}): {result.Summary}");
@@ -394,6 +433,12 @@ public sealed class TrayApp : ApplicationContext
         bool driver = _standIns.DriverPresent;
         _installDriverItem.Text = driver ? "Parsec virtual display driver: installed" : "Install Parsec virtual display driver...";
         _installDriverItem.Enabled = !driver && !_installingDriver;
+        foreach (ToolStripMenuItem item in _delayMenu.DropDownItems)
+            item.Checked = (int)item.Tag! == _settings.StandInDelaySeconds;
+        _autoUpdateItem.Checked = _settings.AutoUpdate;
+        _jiggleItem.Checked = _settings.JiggleWhenIdle;
+        _checkUpdatesItem.Enabled = !_checkingUpdates;
+        _checkUpdatesItem.Text = _checkingUpdates ? "Checking for updates..." : "Check for updates now";
         _startupItem.Checked = Startup.IsEnabled();
 
         string state = !hasProfile ? "no layout saved"
@@ -423,12 +468,121 @@ public sealed class TrayApp : ApplicationContext
             ScheduleApply(e.Reason.ToString());
     }
 
-    private void ScheduleApply(string reason)
+    private void ScheduleApply(string reason, int delayMs = DebounceMs)
     {
         if (!_settings.Enforce || _profile == null) return;
-        Log.Write($"Display change detected ({reason}); checking in {DebounceMs} ms");
+        Log.Write($"Display change detected ({reason}); checking in {delayMs} ms");
         _debounce.Stop();
+        _debounce.Interval = delayMs;
         _debounce.Start();
+    }
+
+    private void ToggleJiggle()
+    {
+        _settings.JiggleWhenIdle = !_settings.JiggleWhenIdle;
+        _settings.Save();
+        _jiggler.Enabled = _settings.JiggleWhenIdle;
+        Log.Write($"JiggleWhenIdle = {_settings.JiggleWhenIdle} (after {_settings.JiggleIdleSeconds} s idle)");
+        RefreshMenu();
+    }
+
+    private void SetStandInDelay(int seconds)
+    {
+        _settings.StandInDelaySeconds = seconds;
+        _settings.Save();
+        _standIns.Delay = TimeSpan.FromSeconds(seconds);
+        Log.Write($"StandInDelaySeconds = {seconds}");
+        RefreshMenu();
+    }
+
+    // ---- Updates ------------------------------------------------------------------------------------
+
+    private void ToggleAutoUpdate()
+    {
+        _settings.AutoUpdate = !_settings.AutoUpdate;
+        _settings.Save();
+        Log.Write($"AutoUpdate = {_settings.AutoUpdate}");
+        RefreshMenu();
+    }
+
+    /// <summary>Checks GitHub for a newer release; installs it when auto-update is on or the user agrees.</summary>
+    private void CheckForUpdates(bool manual)
+    {
+        if (_checkingUpdates) return;
+        _checkingUpdates = true;
+        RefreshMenu();
+
+        Task.Run(async () =>
+        {
+            Updater.Release? release = null;
+            string? error = null;
+            try { release = await Updater.CheckAsync(); }
+            catch (Exception ex) { error = ex.Message; }
+
+            _ui.Post(_ =>
+            {
+                _checkingUpdates = false;
+                RefreshMenu();
+                if (error != null)
+                {
+                    Log.Write("Update check failed: " + error);
+                    if (manual) _tray.ShowBalloonTip(4000, "Monitor Anchor", "Could not check for updates: " + error, ToolTipIcon.Warning);
+                    return;
+                }
+                if (release == null || release.Version <= Updater.Current)
+                {
+                    Log.Write($"Update check: {Updater.Current} is current" + (release == null ? " (no matching release asset)" : $" (latest {release.Version})"));
+                    if (manual) _tray.ShowBalloonTip(3000, "Monitor Anchor", $"You have the latest version ({Updater.Current}).", ToolTipIcon.Info);
+                    return;
+                }
+
+                Log.Write($"Update available: {release.Version} (running {Updater.Current})");
+                bool install = _settings.AutoUpdate;
+                if (!install && manual)
+                {
+                    install = MessageBox.Show($"Monitor Anchor {release.Version} is available (you have {Updater.Current}).\n\nDownload and install it now? The app restarts itself afterwards.",
+                        "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+                }
+                if (install) InstallUpdate(release);
+                else _tray.ShowBalloonTip(5000, "Update available", $"Monitor Anchor {release.Version} is available. Use \"Check for updates now\" to install it.", ToolTipIcon.Info);
+            }, null);
+        });
+    }
+
+    private void InstallUpdate(Updater.Release release)
+    {
+        _checkingUpdates = true;
+        RefreshMenu();
+        _tray.ShowBalloonTip(3000, "Monitor Anchor", $"Downloading version {release.Version}...", ToolTipIcon.Info);
+
+        Task.Run(async () =>
+        {
+            string? path = null, error = null;
+            try { path = await Updater.DownloadAsync(release); }
+            catch (Exception ex) { error = ex.Message; }
+
+            _ui.Post(_ =>
+            {
+                _checkingUpdates = false;
+                RefreshMenu();
+                if (path == null)
+                {
+                    Log.Write("Update download failed: " + error);
+                    _tray.ShowBalloonTip(5000, "Monitor Anchor", "Update failed: " + error, ToolTipIcon.Error);
+                    return;
+                }
+                try
+                {
+                    _tray.ShowBalloonTip(3000, "Monitor Anchor", $"Installing version {release.Version} and restarting...", ToolTipIcon.Info);
+                    if (Updater.SwapAndRestart(path)) ExitThread();
+                }
+                catch (Exception ex)
+                {
+                    Log.Write("Update install failed: " + ex);
+                    _tray.ShowBalloonTip(5000, "Monitor Anchor", "Update install failed: " + ex.Message, ToolTipIcon.Error);
+                }
+            }, null);
+        });
     }
 
     private void OnDebounceElapsed()
@@ -454,6 +608,8 @@ public sealed class TrayApp : ApplicationContext
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _debounce.Dispose();
         _lateSnapshot.Dispose();
+        _updateTimer.Dispose();
+        _jiggler.Dispose();
         _standIns.Dispose(); // retires any fake monitors
         Native.SetThreadExecutionState(Native.ES_CONTINUOUS); // release the keep-awake hold
         _tray.Visible = false;

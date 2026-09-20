@@ -33,8 +33,12 @@ Right-click the tray icon (a small monitor with a white dot):
 | Show saved layout... | View what is saved and where the file lives. |
 | Enforce layout on display changes | Toggle automatic restore. Off = the app just sits there. |
 | Keep displays awake (never sleep) | Hold the display and system idle timers so the screens never turn off. On by default. |
-| Fake monitors when real ones unplug | Optional. When a saved monitor is unplugged, a virtual monitor takes its place at the same resolution and position so your windows stay put. Off by default; needs the Parsec Virtual Display Driver. |
+| Jiggle mouse when idle | Optional. After 60 s without keyboard or mouse input, nudges the mouse one pixel and back every half minute so the session and presence indicators keep seeing activity. Off by default. |
+| Fake monitors when real ones unplug | Optional. When a saved monitor is unplugged, a virtual monitor takes its place at the same resolution and position so the desktop keeps its shape. Off by default; needs the Parsec Virtual Display Driver. |
 | Install Parsec virtual display driver... | Downloads the signed Parsec driver installer and runs it silently (Windows asks for administrator approval). Shows "installed" once the driver is present. |
+| Fake monitor delay | How long a monitor must be gone before a fake one takes its place: immediately, 5 s, 15 s, 1 min or 5 min (default 10 s, set in settings.json). Keeps a quick KVM switch from creating and tearing down fake monitors. |
+| Check for updates now | Asks GitHub for the latest release and offers to install it. |
+| Install updates automatically | Checks 30 s after start and then daily; when a newer release exists, downloads the matching build, verifies its size and checksum, swaps the exe in place and restarts. On by default. |
 | Start with Windows | Toggle the Run-key registration (on by default after first launch). |
 | Open log | Opens the activity log in your text editor. |
 | Exit | Quit (releases the keep-awake hold). |
@@ -45,7 +49,8 @@ Command-line switches (no tray icon, exit immediately):
 | --- | --- |
 | `--persist` | Save the current layout as the profile. |
 | `--apply` | Restore the saved profile once. |
-| `--dump` | Write the live layout, HDR state and connected monitors to `dump.txt` in the data folder. |
+| `--dump` | Write the live layout, HDR state, connected monitors and each monitor's EDID (manufacturer, model, serial) to `dump.txt` in the data folder. Handy for checking whether a KVM passes the real EDID through. |
+| `--windows` | Log every visible window's position, size, state and monitor. |
 | `--test-enable` | Check, without changing anything, whether disabled-but-connected monitors could be re-enabled in a targeted way. Result goes to the log. |
 
 Data folder: `%LOCALAPPDATA%\MonitorAnchor\` (`profile.json`, `settings.json`, `log.txt`).

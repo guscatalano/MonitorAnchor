@@ -17,7 +17,12 @@
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
+  </PropertyGroup>
+
+  <!-- Lets the updater pick the release asset that matches how this build was published. -->
+  <PropertyGroup Condition="'$(SelfContained)' == 'true'">
+    <DefineConstants>$(DefineConstants);SELF_CONTAINED</DefineConstants>
   </PropertyGroup>
 
 </Project>

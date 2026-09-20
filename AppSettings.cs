@@ -17,6 +17,16 @@ public sealed class AppSettings
     /// </summary>
     public bool VirtualStandIns { get; set; } = false;
 
+    /// <summary>How long a saved monitor must be missing before a fake one takes its place (0 = immediately).</summary>
+    public int StandInDelaySeconds { get; set; } = 10;
+
+    /// <summary>Nudge the mouse one pixel when there has been no input for JiggleIdleSeconds, to look active.</summary>
+    public bool JiggleWhenIdle { get; set; } = false;
+    public int JiggleIdleSeconds { get; set; } = 60;
+
+    /// <summary>Check GitHub for a newer release at startup and daily, and install it automatically.</summary>
+    public bool AutoUpdate { get; set; } = true;
+
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
     public static string Path => System.IO.Path.Combine(DisplayProfile.ConfigDir, "settings.json");
 

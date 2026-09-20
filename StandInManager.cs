@@ -11,6 +11,13 @@ public sealed class StandInManager : IDisposable
     private ParsecVdd? _vdd;
     private readonly List<int> _owned = new();
     private bool _warnedMissingDriver;
+    private readonly Dictionary<string, DateTime> _missingSince = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How long a monitor must be gone before it gets a stand-in.</summary>
+    public TimeSpan Delay { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>After <see cref="AddAndPosition"/>: time until the next monitor becomes due for a stand-in, if any.</summary>
+    public TimeSpan? NextDue { get; private set; }
 
     public bool DriverPresent => ParsecVdd.IsDriverPresent();
     public int ActiveStandIns => _owned.Count;
@@ -69,7 +76,22 @@ public sealed class StandInManager : IDisposable
     /// </summary>
     public ApplyResult? AddAndPosition(DisplayProfile saved)
     {
-        var missing = Missing(saved);
+        NextDue = null;
+        var allMissing = Missing(saved);
+
+        // Only monitors that have been gone for at least Delay get a stand-in; the rest are just tracked.
+        var now = DateTime.UtcNow;
+        var stillMissing = allMissing.Select(m => m.MonitorId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in _missingSince.Keys.Where(k => !stillMissing.Contains(k)).ToList()) _missingSince.Remove(id);
+        var missing = new List<MonitorSettings>();
+        foreach (var m in allMissing)
+        {
+            if (!_missingSince.TryGetValue(m.MonitorId, out var since)) _missingSince[m.MonitorId] = since = now;
+            var remaining = Delay - (now - since);
+            if (remaining <= TimeSpan.Zero) { missing.Add(m); continue; }
+            if (NextDue == null || remaining < NextDue) NextDue = remaining;
+            Log.Write($"Stand-in: {m.MonitorName} missing for {(now - since).TotalSeconds:F0} s; fake monitor due in {remaining.TotalSeconds:F0} s");
+        }
         if (missing.Count == 0 && _owned.Count == 0) return null;
 
         var vdd = Driver();
