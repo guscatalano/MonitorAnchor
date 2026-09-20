@@ -52,7 +52,8 @@ public sealed class AboutForm : Form
         var releases = Link("Releases and changelog", GitHubUrl + "/releases", 102, 174);
         var folder = Link("Open data folder", DisplayProfile.ConfigDir, 102, 196);
 
-        var ok = new Button { Text = "Close", DialogResult = DialogResult.OK, Size = new Size(80, 26), Location = new Point(360, 210) };
+        var ok = new Button { Text = "Close", Size = new Size(80, 26), Location = new Point(360, 210) };
+        ok.Click += (_, _) => Close(); // shown modeless, so a DialogResult alone would not close it
         AcceptButton = ok;
         CancelButton = ok;
 
