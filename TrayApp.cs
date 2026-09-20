@@ -31,6 +31,8 @@ public sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _jiggleItem;
     private readonly ToolStripMenuItem _rdpItem;
     private readonly ToolStripMenuItem _tourItem;
+    private readonly ToolStripMenuItem _mouseOffItem;
+    private readonly ToolStripMenuItem _idleAfterMenu;
     private readonly ToolStripMenuItem _wuStatusItem;
     private readonly ToolStripMenuItem _wuMenu;
     private readonly Jiggler _jiggler = new();
@@ -79,13 +81,30 @@ public sealed class TrayApp : ApplicationContext
         _enforceItem = new ToolStripMenuItem("Enforce layout on display changes", null, (_, _) => ToggleEnforce()) { CheckOnClick = false };
         _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup()) { CheckOnClick = false };
         _keepAwakeItem = new ToolStripMenuItem("Keep displays awake (never sleep)", null, (_, _) => ToggleKeepAwake()) { CheckOnClick = false };
-        _jiggleItem = new ToolStripMenuItem("Jiggle mouse when idle", null, (_, _) => ToggleJiggle()) { CheckOnClick = false };
+        // Everything that happens while you are idle lives in one submenu. The mouse choice is one-of-three
+        // (hovering over every window already includes a nudge); poking Remote Desktop is separate because it
+        // also takes focus and presses a key.
+        if (_settings.WiggleAllWindows) _settings.JiggleWhenIdle = false; // hover subsumes nudge
         _jiggler.IdleThreshold = TimeSpan.FromSeconds(Math.Max(10, _settings.JiggleIdleSeconds));
         _jiggler.JiggleMouse = _settings.JiggleWhenIdle;
-        _rdpItem = new ToolStripMenuItem("Keep Remote Desktop sessions alive when idle", null, (_, _) => ToggleRdp()) { CheckOnClick = false };
-        _jiggler.KeepRdpAlive = _settings.KeepRdpAlive;
-        _tourItem = new ToolStripMenuItem("Wiggle mouse over every window when idle", null, (_, _) => ToggleTour()) { CheckOnClick = false };
         _jiggler.WiggleAllWindows = _settings.WiggleAllWindows;
+        _jiggler.KeepRdpAlive = _settings.KeepRdpAlive;
+
+        _mouseOffItem = new ToolStripMenuItem("Leave the mouse alone", null, (_, _) => SetMouseMode(nudge: false, hover: false)) { CheckOnClick = false };
+        _jiggleItem = new ToolStripMenuItem("Nudge the mouse in place", null, (_, _) => SetMouseMode(nudge: true, hover: false)) { CheckOnClick = false };
+        _tourItem = new ToolStripMenuItem("Hover over every window (includes a nudge)", null, (_, _) => SetMouseMode(nudge: false, hover: true)) { CheckOnClick = false };
+        _rdpItem = new ToolStripMenuItem("Also poke Remote Desktop sessions (focus + F15)", null, (_, _) => ToggleRdp()) { CheckOnClick = false };
+        _idleAfterMenu = new ToolStripMenuItem("Count as idle after");
+        foreach (var (label, seconds) in new[] { ("30 seconds", 30), ("1 minute", 60), ("2 minutes", 120), ("5 minutes", 300), ("10 minutes", 600) })
+            _idleAfterMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => SetIdleSeconds(seconds)) { Tag = seconds });
+        var idleMenu = new ToolStripMenuItem("When idle");
+        idleMenu.DropDownItems.Add(_mouseOffItem);
+        idleMenu.DropDownItems.Add(_jiggleItem);
+        idleMenu.DropDownItems.Add(_tourItem);
+        idleMenu.DropDownItems.Add(new ToolStripSeparator());
+        idleMenu.DropDownItems.Add(_rdpItem);
+        idleMenu.DropDownItems.Add(new ToolStripSeparator());
+        idleMenu.DropDownItems.Add(_idleAfterMenu);
 
         // Windows Update pause lives in its own submenu; every action prompts for administrator approval.
         _wuStatusItem = new ToolStripMenuItem("Status") { Enabled = false };
@@ -124,9 +143,7 @@ public sealed class TrayApp : ApplicationContext
 
         menu.Items.Add(_enforceItem);
         menu.Items.Add(_keepAwakeItem);
-        menu.Items.Add(_jiggleItem);
-        menu.Items.Add(_rdpItem);
-        menu.Items.Add(_tourItem);
+        menu.Items.Add(idleMenu);
         menu.Items.Add(fakeMenu);
         menu.Items.Add(_wuMenu);
         menu.Items.Add(new ToolStripSeparator());
@@ -511,9 +528,12 @@ public sealed class TrayApp : ApplicationContext
         foreach (ToolStripMenuItem item in _delayMenu.DropDownItems)
             item.Checked = (int)item.Tag! == _settings.StandInDelaySeconds;
         _autoUpdateItem.Checked = _settings.AutoUpdate;
+        _mouseOffItem.Checked = !_settings.JiggleWhenIdle && !_settings.WiggleAllWindows;
         _jiggleItem.Checked = _settings.JiggleWhenIdle;
-        _rdpItem.Checked = _settings.KeepRdpAlive;
         _tourItem.Checked = _settings.WiggleAllWindows;
+        _rdpItem.Checked = _settings.KeepRdpAlive;
+        foreach (ToolStripMenuItem item in _idleAfterMenu.DropDownItems)
+            item.Checked = (int)item.Tag! == _settings.JiggleIdleSeconds;
         var pausedUntil = WindowsUpdate.PausedUntil();
         _wuStatusItem.Text = pausedUntil == null ? "Updates are not paused" : $"Paused until {pausedUntil:g}";
         _checkUpdatesItem.Enabled = !_checkingUpdates;
@@ -557,12 +577,23 @@ public sealed class TrayApp : ApplicationContext
         _debounce.Start();
     }
 
-    private void ToggleJiggle()
+    private void SetMouseMode(bool nudge, bool hover)
     {
-        _settings.JiggleWhenIdle = !_settings.JiggleWhenIdle;
+        _settings.JiggleWhenIdle = nudge;
+        _settings.WiggleAllWindows = hover;
         _settings.Save();
-        _jiggler.JiggleMouse = _settings.JiggleWhenIdle;
-        Log.Write($"JiggleWhenIdle = {_settings.JiggleWhenIdle} (after {_settings.JiggleIdleSeconds} s idle)");
+        _jiggler.JiggleMouse = nudge;
+        _jiggler.WiggleAllWindows = hover;
+        Log.Write($"When idle, mouse: {(hover ? "hover over every window" : nudge ? "nudge in place" : "leave alone")} (after {_settings.JiggleIdleSeconds} s idle)");
+        RefreshMenu();
+    }
+
+    private void SetIdleSeconds(int seconds)
+    {
+        _settings.JiggleIdleSeconds = seconds;
+        _settings.Save();
+        _jiggler.IdleThreshold = TimeSpan.FromSeconds(seconds);
+        Log.Write($"JiggleIdleSeconds = {seconds}");
         RefreshMenu();
     }
 
@@ -573,15 +604,6 @@ public sealed class TrayApp : ApplicationContext
         _jiggler.KeepRdpAlive = _settings.KeepRdpAlive;
         var sessions = RemoteDesktop.FindSessions();
         Log.Write($"KeepRdpAlive = {_settings.KeepRdpAlive} (after {_settings.JiggleIdleSeconds} s idle; {sessions.Count} Remote Desktop window(s) open now)");
-        RefreshMenu();
-    }
-
-    private void ToggleTour()
-    {
-        _settings.WiggleAllWindows = !_settings.WiggleAllWindows;
-        _settings.Save();
-        _jiggler.WiggleAllWindows = _settings.WiggleAllWindows;
-        Log.Write($"WiggleAllWindows = {_settings.WiggleAllWindows} (after {_settings.JiggleIdleSeconds} s idle)");
         RefreshMenu();
     }
 
@@ -780,7 +802,7 @@ public sealed class TrayApp : ApplicationContext
 
         _menu.Show(new Point(200, 200));
         Application.DoEvents();
-        var fake = _menu.Items.OfType<ToolStripMenuItem>().First(i => i.Text == "Fake monitors");
+        var fake = _menu.Items.OfType<ToolStripMenuItem>().First(i => i.Text == "When idle");
         fake.ShowDropDown();
         Application.DoEvents();
         System.Threading.Thread.Sleep(200);
