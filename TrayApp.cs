@@ -256,7 +256,12 @@ public sealed class TrayApp : ApplicationContext
         ApplyKeepAwake();
         WindowSnapshot.LogNow("startup");
         Log.Write("System:" + Environment.NewLine + SystemInfo.Describe());
-        OfferInstall();
+        // The offer must run inside the message loop, not here in the constructor: accepting it exits the app,
+        // and an ExitThread before Application.Run has started is silently lost, leaving a ghost instance that
+        // holds the single-instance lock while the installed copy waits for it and gives up.
+        var offer = new System.Windows.Forms.Timer { Interval = 1500 };
+        offer.Tick += (_, _) => { offer.Dispose(); OfferInstall(); };
+        if (!ScreenshotMode) offer.Start();
         Log.Write($"Started. {_store.Layouts.Count} saved layout(s); active: {(_profile == null ? "none matches the connected monitors" : $"\"{_profile.Name}\" ({_profile.Monitors.Count} monitor(s), captured {_profile.CapturedAt:g})")}; enforce={_settings.Enforce}");
 
         if (ScreenshotMode)

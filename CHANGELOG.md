@@ -3,6 +3,14 @@
 All notable changes to Monitor Anchor. The release workflow uses the section for the tagged version as the
 release notes, so keep the heading format `## X.Y.Z - YYYY-MM-DD`.
 
+## 2.4.1 - 2026-09-20
+
+**Fixed**
+- Accepting the "install to Programs folder" offer on first run left the old instance running invisibly and the
+  installed copy never appeared, until the process was killed by hand. The offer now runs inside the message
+  loop, and a new instance that is handed a predecessor which does not exit within 15 seconds ends it and
+  takes over. A refused start because another instance holds the lock is now logged.
+
 ## 2.4.0 - 2026-09-20
 
 **New**

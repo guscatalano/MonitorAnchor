@@ -1,0 +1,70 @@
+Monitor Anchor 2.4.0 (MonitorAnchor-selfcontained.exe)  2026-09-20 10:39:52
+Data folder: C:\Users\work\AppData\Local\MonitorAnchor
+Running from: C:\Users\work\AppData\Local\Programs\MonitorAnchor\MonitorAnchor.exe  (installed)
+
+SYSTEM
+  DESKTOP-581MFCV, AMD Ryzen 5 5560U with Radeon Graphics, 13 GB RAM
+  Windows 10 Pro 25H2 build 26200.9457
+  up 113 h 13 min (booted 09/15/2026 17:25)
+  power plan: display off after never on AC, 3 min on battery; sleep after never on AC, 10 min on battery
+  AMD Radeon(TM) Graphics, driver 31.0.12027.9001 (3-30-2023)
+  Parsec Virtual Display Adapter, driver 0.41.0.0 (9-14-2022)
+  \\.\DISPLAY1: HDMI, YCbCr 4:4:4 8 bpc, 1920x1080 @ 119.880 Hz, pixel clock 296.7 MHz, HDR offered
+  \\.\DISPLAY2: HDMI, YCbCr 4:4:4 10 bpc, 1920x1080 @ 119.880 Hz, pixel clock 296.7 MHz, HDR offered
+
+SAVED LAYOUTS (1)
+  Generic PnP Monitor ×2   <- active for the connected monitors   (captured 09/19/2026 19:36)
+    • Generic PnP Monitor [\\.\DISPLAY1] 1920x1080 @ 119Hz, pos (0,-1080), rot 0°, HDR on
+    • Generic PnP Monitor [\\.\DISPLAY2] 1920x1080 @ 119Hz, pos (0,0), rot 0°, primary, HDR on
+
+LIVE LAYOUT
+  • VG259QM [\\.\DISPLAY1] 1920x1080 @ 119Hz, pos (0,-1080), rot 0°, 100%, HDR on
+  • VG259QM [\\.\DISPLAY2] 1920x1080 @ 119Hz, pos (0,0), rot 0°, primary, 100%, HDR on
+
+MONITOR IDS
+  VG259QM              \\?\DISPLAY#AUS25A8#5&340a2d70&1&UID256#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}
+  VG259QM              \\?\DISPLAY#AUS25A8#5&340a2d70&1&UID268#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}
+
+SCALING (per adapter output)
+  \\.\DISPLAY1: 100% (recommended 100%, up to 175%) [rc=0 min=0 cur=0 max=3 src=0]
+  \\.\DISPLAY2: 100% (recommended 100%, up to 175%) [rc=0 min=0 cur=0 max=3 src=1]
+
+HDR (per adapter output)
+  \\.\DISPLAY1: supported=True enabled=True (v1 value=0x3)
+  \\.\DISPLAY2: supported=True enabled=True (v1 value=0x3)
+
+CONNECTED MONITORS (DisplayConfig)
+  active   VG259QM              \\?\DISPLAY#AUS25A8#5&340a2d70&1&UID256#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}
+  active   VG259QM              \\?\DISPLAY#AUS25A8#5&340a2d70&1&UID268#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}
+
+EDID (as cached by Windows; a KVM with EDID emulation shows its own values here)
+  VG259QM              AUS 25A8 "VG259QM" serial 16843009 / "S1LMQS002148" made wk1/2024
+  VG259QM              AUS 25A8 "VG259QM" serial 16843009 / "S4LMQS077249" made wk16/2024
+  monitors report distinct EDIDs: pass-through (no EDID emulation detected)
+
+KVM / DOCK
+  KVM suspected: 109 switch(es) away, 107 back, last 09/20/2026 10:39 (216 switched USB only; the KVM keeps video connected)
+  (inferred: a KVM takes monitors and USB input devices away together; a dock also takes hubs, network and storage)
+
+VIRTUAL DISPLAY DRIVER
+  Parsec VDD installed: True
+
+INPUT
+  human idle 0 s (system idle 0 s); hooks; 746 human event(s), 0 of ours
+
+WINDOW MEMORY / PRESENCE
+  off: nothing remembered yet
+  presence: active, last human input 0 s ago
+
+REMOTE DESKTOP WINDOWS
+  full-screen \\.\DISPLAY2   msrdc: guscatal-ai
+
+Windows (now):
+    \\.\DISPLAY2   normal    (167,209) 780x590          Taskmgr: Task Manager
+    \\.\DISPLAY2   normal    (408,0) 1216x941           ApplicationFrameHost: Settings
+    \\.\DISPLAY2   normal    (149,66) 1296x936          firefox: Change the refresh rate on your monitor …
+    \\.\DISPLAY2   normal    (0,0) 1920x1032            msrdc: guscatal-ai
+    \\.\DISPLAY2   normal    (670,261) 1139x641         explorer: crimson - File Explorer
+    \\.\DISPLAY2   normal    (78,78) 1440x753           Notepad: New Text Document.txt - Notepad
+    \\.\DISPLAY2   normal    (360,170) 1200x740         Windows365: Windows App
+    \\.\DISPLAY2   normal    (160,66) 1600x900          Spotify: Spotify Premium

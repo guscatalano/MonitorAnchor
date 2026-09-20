@@ -11,7 +11,18 @@ internal static class Program
         int waitIdx = Array.FindIndex(args, a => string.Equals(a, "--wait-for", StringComparison.OrdinalIgnoreCase));
         if (waitIdx >= 0 && waitIdx + 1 < args.Length && int.TryParse(args[waitIdx + 1], out int pid))
         {
-            try { Process.GetProcessById(pid).WaitForExit(15_000); } catch { /* already gone */ }
+            try
+            {
+                var previous = Process.GetProcessById(pid);
+                if (!previous.WaitForExit(15_000) && previous.ProcessName.Equals("MonitorAnchor", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Our predecessor is stuck (seen when the install offer ran before the message loop); take over.
+                    Log.Write($"Previous instance {pid} did not exit within 15 s; ending it");
+                    previous.Kill();
+                    previous.WaitForExit(5_000);
+                }
+            }
+            catch { /* already gone */ }
         }
         Updater.CleanupOld();
         Log.Trim();
@@ -105,7 +116,11 @@ internal static class Program
         }
 
         using var mutex = new Mutex(initiallyOwned: true, @"Local\MonitorAnchor.SingleInstance", out bool createdNew);
-        if (!createdNew) return; // already running in this session
+        if (!createdNew)
+        {
+            Log.Write($"Not starting: another instance is already running (this one: {Environment.ProcessPath})");
+            return;
+        }
 
         ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
